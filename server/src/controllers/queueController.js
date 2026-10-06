@@ -3,7 +3,9 @@ const {
     callNext,
     startServing,
     completeEntry,
-    cancelEntry
+    cancelEntry,
+    getServiceQueue,
+    getMyQueueEntry
 } = require("../services/queueService");
 
 async function joinQueueController(req, res, next) {
@@ -24,7 +26,7 @@ async function joinQueueController(req, res, next) {
         }
 
         const entry = await joinQueue(userId, serviceId.trim());
-        res.json(entry);
+        res.status(201).json(entry);
     } catch (error) {
         next(error);
     }
@@ -41,6 +43,11 @@ async function callNextController(req, res, next) {
         }
 
         const entry = await callNext(serviceId.trim());
+
+        if (!entry) {
+            return res.json({ message: "No one is waiting in the queue" });
+        }
+
         res.json(entry);
     } catch (error) {
         next(error);
@@ -91,7 +98,39 @@ async function cancelEntryController(req, res, next) {
             throw error;
         }
 
-        const entry = await cancelEntry(id.trim());
+        const entry = await cancelEntry(id.trim(), req.user);
+        res.json(entry);
+    } catch (error) {
+        next(error);
+    }
+}
+
+async function getServiceQueueController(req, res, next) {
+    try {
+        const { serviceId } = req.params;
+
+        if (!serviceId || typeof serviceId !== "string" || serviceId.trim() === "") {
+            const error = new Error("Service ID is required");
+            error.statusCode = 400;
+            throw error;
+        }
+
+        const entries = await getServiceQueue(serviceId.trim());
+        res.json(entries);
+    } catch (error) {
+        next(error);
+    }
+}
+
+async function getMyQueueEntryController(req, res, next) {
+    try {
+        if (!req.user || !req.user.userId) {
+            const error = new Error("Authentication required");
+            error.statusCode = 401;
+            throw error;
+        }
+
+        const entry = await getMyQueueEntry(req.user.userId);
         res.json(entry);
     } catch (error) {
         next(error);
@@ -103,5 +142,7 @@ module.exports = {
     callNextController,
     startServingController,
     completeEntryController,
-    cancelEntryController
+    cancelEntryController,
+    getServiceQueueController,
+    getMyQueueEntryController
 };

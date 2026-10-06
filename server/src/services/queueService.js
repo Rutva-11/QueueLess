@@ -197,7 +197,7 @@ async function completeEntry(entryId) {
     return entry;
 }
 
-async function cancelEntry(entryId) {
+async function cancelEntry(entryId, user) {
     let entry;
     try {
         entry = await QueueEntry.findById(entryId);
@@ -216,6 +216,12 @@ async function cancelEntry(entryId) {
         throw error;
     }
 
+    if (user && user.role === "USER" && entry.userId.toString() !== user.userId) {
+        const error = new Error("Access denied");
+        error.statusCode = 403;
+        throw error;
+    }
+
     if (!canTransition(entry.status, "CANCELLED")) {
         const error = new Error("Invalid status transition");
         error.statusCode = 409;
@@ -228,10 +234,58 @@ async function cancelEntry(entryId) {
     return entry;
 }
 
+async function getServiceQueue(serviceId) {
+    let service;
+    try {
+        service = await Service.findById(serviceId);
+    } catch (err) {
+        if (err.name === "CastError") {
+            const error = new Error("Service not found");
+            error.statusCode = 404;
+            throw error;
+        }
+        throw err;
+    }
+
+    if (!service) {
+        const error = new Error("Service not found");
+        error.statusCode = 404;
+        throw error;
+    }
+
+    const entries = await QueueEntry.find({
+        serviceId,
+        status: { $in: ["WAITING", "CALLED", "SERVING"] }
+    })
+        .sort({ tokenNumber: 1 })
+        .populate({ path: "userId", select: "name email" })
+        .populate({ path: "serviceId", select: "name tokenPrefix avgServiceMinutes" });
+
+    return entries;
+}
+
+async function getMyQueueEntry(userId) {
+    const entry = await QueueEntry.findOne({
+        userId,
+        status: { $in: ["WAITING", "CALLED", "SERVING"] }
+    })
+        .populate({ path: "serviceId", select: "name tokenPrefix avgServiceMinutes" });
+
+    if (!entry) {
+        const error = new Error("No active queue entry found");
+        error.statusCode = 404;
+        throw error;
+    }
+
+    return entry;
+}
+
 module.exports = {
     joinQueue,
     callNext,
     startServing,
     completeEntry,
-    cancelEntry
+    cancelEntry,
+    getServiceQueue,
+    getMyQueueEntry
 };
