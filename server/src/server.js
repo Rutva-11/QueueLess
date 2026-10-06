@@ -1,6 +1,9 @@
-const express = require("express");
+require("dotenv").config();
 
+const express = require("express");
 const queueRoutes = require("./routes/queueRoutes");
+const connectDatabase = require("./config/database");
+
 const errorHandler = require("./middlewares/errorHandler");
 
 const app = express();
@@ -16,6 +19,8 @@ app.get("/", (req, res) => {
 app.use("/api/queue", queueRoutes);
 
 app.use(errorHandler);
+
+connectDatabase();
 
 app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
