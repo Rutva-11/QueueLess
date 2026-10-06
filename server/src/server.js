@@ -1,7 +1,11 @@
-require("dotenv").config();
+const path = require("path");
+require("dotenv").config({
+    path: path.resolve(__dirname, "../.env")
+});
 
 const express = require("express");
 const queueRoutes = require("./routes/queueRoutes");
+const authRoutes = require("./routes/authRoutes");
 const connectDatabase = require("./config/database");
 
 const errorHandler = require("./middlewares/errorHandler");
@@ -9,6 +13,8 @@ const errorHandler = require("./middlewares/errorHandler");
 const app = express();
 
 app.use(express.json());
+
+app.use("/api/auth", authRoutes);
 
 const PORT = 3000;
 

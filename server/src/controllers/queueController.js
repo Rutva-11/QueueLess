@@ -8,13 +8,14 @@ const {
 
 async function joinQueueController(req, res, next) {
     try {
-        const { userId, serviceId } = req.body || {};
-
-        if (!userId || typeof userId !== "string" || userId.trim() === "") {
-            const error = new Error("User ID is required");
-            error.statusCode = 400;
+        if (!req.user || !req.user.userId) {
+            const error = new Error("Authentication required");
+            error.statusCode = 401;
             throw error;
         }
+
+        const userId = req.user.userId;
+        const { serviceId } = req.body || {};
 
         if (!serviceId || typeof serviceId !== "string" || serviceId.trim() === "") {
             const error = new Error("Service ID is required");
@@ -22,7 +23,7 @@ async function joinQueueController(req, res, next) {
             throw error;
         }
 
-        const entry = await joinQueue(userId.trim(), serviceId.trim());
+        const entry = await joinQueue(userId, serviceId.trim());
         res.json(entry);
     } catch (error) {
         next(error);
