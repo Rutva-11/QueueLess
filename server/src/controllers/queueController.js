@@ -8,6 +8,14 @@ const {
     getMyQueueEntry
 } = require("../services/queueService");
 
+const {
+    emitQueueJoined,
+    emitQueueCalled,
+    emitQueueStarted,
+    emitQueueCompleted,
+    emitQueueCancelled
+} = require("../sockets/queueEmitter");
+
 async function joinQueueController(req, res, next) {
     try {
         if (!req.user || !req.user.userId) {
@@ -26,6 +34,7 @@ async function joinQueueController(req, res, next) {
         }
 
         const entry = await joinQueue(userId, serviceId.trim());
+        emitQueueJoined(entry);
         res.status(201).json(entry);
     } catch (error) {
         next(error);
@@ -48,6 +57,7 @@ async function callNextController(req, res, next) {
             return res.json({ message: "No one is waiting in the queue" });
         }
 
+        emitQueueCalled(entry);
         res.json(entry);
     } catch (error) {
         next(error);
@@ -65,6 +75,7 @@ async function startServingController(req, res, next) {
         }
 
         const entry = await startServing(id.trim());
+        emitQueueStarted(entry);
         res.json(entry);
     } catch (error) {
         next(error);
@@ -82,6 +93,7 @@ async function completeEntryController(req, res, next) {
         }
 
         const entry = await completeEntry(id.trim());
+        emitQueueCompleted(entry);
         res.json(entry);
     } catch (error) {
         next(error);
@@ -99,6 +111,7 @@ async function cancelEntryController(req, res, next) {
         }
 
         const entry = await cancelEntry(id.trim(), req.user);
+        emitQueueCancelled(entry);
         res.json(entry);
     } catch (error) {
         next(error);

@@ -3,12 +3,14 @@ require("dotenv").config({
     path: path.resolve(__dirname, "../.env")
 });
 
+const http = require("http");
 const express = require("express");
 const queueRoutes = require("./routes/queueRoutes");
 const authRoutes = require("./routes/authRoutes");
 const connectDatabase = require("./config/database");
 
 const errorHandler = require("./middlewares/errorHandler");
+const { initSocketServer } = require("./sockets/socketServer");
 
 const app = express();
 
@@ -28,6 +30,9 @@ app.use(errorHandler);
 
 connectDatabase();
 
-app.listen(PORT, () => {
+const server = http.createServer(app);
+initSocketServer(server);
+
+server.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
 });
