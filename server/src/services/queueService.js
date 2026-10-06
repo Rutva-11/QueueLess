@@ -1,5 +1,6 @@
-const queue = [];
-let tokenCounter = 1;
+const QueueEntry = require("../models/QueueEntry");
+const User = require("../models/User");
+const Service = require("../models/Service");
 
 const transitions = {
     WAITING: ["CALLED", "CANCELLED"],
@@ -23,94 +24,208 @@ function canTransition(currentStatus, nextStatus) {
     return false;
 }
 
-function joinQueue(customerId) {
-    for (let i = 0; i < queue.length; i++) {
-        if (
-            queue[i].customerId === customerId &&
-            ["WAITING", "CALLED", "SERVING"].includes(queue[i].status)
-        ) {
-            throw new Error("Customer already has an active queue entry");
+async function joinQueue(userId, serviceId) {
+    let user;
+    try {
+        user = await User.findById(userId);
+    } catch (err) {
+        if (err.name === "CastError") {
+            const error = new Error("User not found");
+            error.statusCode = 404;
+            throw error;
         }
+        throw err;
     }
 
-    const entry = {
-        id: `entry-${tokenCounter}`,
-        customerId: customerId,
-        token: `A-${String(tokenCounter).padStart(3, "0")}`,
-        status: "WAITING"
-    };
+    if (!user) {
+        const error = new Error("User not found");
+        error.statusCode = 404;
+        throw error;
+    }
 
-    queue.push(entry);
-    tokenCounter++;
+    let service;
+    try {
+        service = await Service.findById(serviceId);
+    } catch (err) {
+        if (err.name === "CastError") {
+            const error = new Error("Service not found");
+            error.statusCode = 404;
+            throw error;
+        }
+        throw err;
+    }
+
+    if (!service) {
+        const error = new Error("Service not found");
+        error.statusCode = 404;
+        throw error;
+    }
+
+    if (!service.isActive) {
+        const error = new Error("Service is not active");
+        error.statusCode = 400;
+        throw error;
+    }
+
+    const existingActive = await QueueEntry.findOne({
+        userId,
+        serviceId,
+        status: { $in: ["WAITING", "CALLED", "SERVING"] }
+    });
+
+    if (existingActive) {
+        const error = new Error("Customer already has an active queue entry");
+        error.statusCode = 409;
+        throw error;
+    }
+
+    const lastEntry = await QueueEntry.findOne({ serviceId }).sort({ tokenNumber: -1 });
+    const tokenNumber = lastEntry ? lastEntry.tokenNumber + 1 : 1;
+    const prefix = service.tokenPrefix || "A";
+    const tokenLabel = `${prefix}-${String(tokenNumber).padStart(3, "0")}`;
+
+    const entry = await QueueEntry.create({
+        serviceId,
+        userId,
+        tokenNumber,
+        tokenLabel,
+        status: "WAITING"
+    });
 
     return entry;
 }
 
-function callNext() {
-    for (let i = 0; i < queue.length; i++) {
-        if (queue[i].status === "WAITING") {
-            if (!canTransition(queue[i].status, "CALLED")) {
-                throw new Error("Invalid status transition");
-            }
-
-            queue[i].status = "CALLED";
-
-            return queue[i];
+async function callNext(serviceId) {
+    let service;
+    try {
+        service = await Service.findById(serviceId);
+    } catch (err) {
+        if (err.name === "CastError") {
+            const error = new Error("Service not found");
+            error.statusCode = 404;
+            throw error;
         }
+        throw err;
     }
 
-    return null;
+    if (!service) {
+        const error = new Error("Service not found");
+        error.statusCode = 404;
+        throw error;
+    }
+
+    const entry = await QueueEntry.findOne({
+        serviceId,
+        status: "WAITING"
+    }).sort({ createdAt: 1 });
+
+    if (!entry) {
+        return null;
+    }
+
+    if (!canTransition(entry.status, "CALLED")) {
+        const error = new Error("Invalid status transition");
+        error.statusCode = 409;
+        throw error;
+    }
+
+    entry.status = "CALLED";
+    await entry.save();
+
+    return entry;
 }
 
-function startServing(entryId) {
-    for (let i = 0; i < queue.length; i++) {
-        if (queue[i].id === entryId) {
-
-            if (!canTransition(queue[i].status, "SERVING")) {
-                throw new Error("Invalid status transition");
-            }
-
-            queue[i].status = "SERVING";
-
-            return queue[i];
+async function startServing(entryId) {
+    let entry;
+    try {
+        entry = await QueueEntry.findById(entryId);
+    } catch (err) {
+        if (err.name === "CastError") {
+            const error = new Error("Queue entry not found");
+            error.statusCode = 404;
+            throw error;
         }
+        throw err;
     }
 
-    throw new Error("Queue entry not found");
+    if (!entry) {
+        const error = new Error("Queue entry not found");
+        error.statusCode = 404;
+        throw error;
+    }
+
+    if (!canTransition(entry.status, "SERVING")) {
+        const error = new Error("Invalid status transition");
+        error.statusCode = 409;
+        throw error;
+    }
+
+    entry.status = "SERVING";
+    await entry.save();
+
+    return entry;
 }
 
-function completeEntry(entryId) {
-    for (let i = 0; i < queue.length; i++) {
-        if (queue[i].id === entryId) {
-
-            if (!canTransition(queue[i].status, "COMPLETED")) {
-                throw new Error("Invalid status transition");
-            }
-
-            queue[i].status = "COMPLETED";
-
-            return queue[i];
+async function completeEntry(entryId) {
+    let entry;
+    try {
+        entry = await QueueEntry.findById(entryId);
+    } catch (err) {
+        if (err.name === "CastError") {
+            const error = new Error("Queue entry not found");
+            error.statusCode = 404;
+            throw error;
         }
+        throw err;
     }
 
-    throw new Error("Queue entry not found");
+    if (!entry) {
+        const error = new Error("Queue entry not found");
+        error.statusCode = 404;
+        throw error;
+    }
+
+    if (!canTransition(entry.status, "COMPLETED")) {
+        const error = new Error("Invalid status transition");
+        error.statusCode = 409;
+        throw error;
+    }
+
+    entry.status = "COMPLETED";
+    await entry.save();
+
+    return entry;
 }
 
-function cancelEntry(entryId) {
-    for (let i = 0; i < queue.length; i++) {
-        if (queue[i].id === entryId) {
-
-            if (!canTransition(queue[i].status, "CANCELLED")) {
-                throw new Error("Invalid status transition");
-            }
-
-            queue[i].status = "CANCELLED";
-
-            return queue[i];
+async function cancelEntry(entryId) {
+    let entry;
+    try {
+        entry = await QueueEntry.findById(entryId);
+    } catch (err) {
+        if (err.name === "CastError") {
+            const error = new Error("Queue entry not found");
+            error.statusCode = 404;
+            throw error;
         }
+        throw err;
     }
 
-    throw new Error("Queue entry not found");
+    if (!entry) {
+        const error = new Error("Queue entry not found");
+        error.statusCode = 404;
+        throw error;
+    }
+
+    if (!canTransition(entry.status, "CANCELLED")) {
+        const error = new Error("Invalid status transition");
+        error.statusCode = 409;
+        throw error;
+    }
+
+    entry.status = "CANCELLED";
+    await entry.save();
+
+    return entry;
 }
 
 module.exports = {

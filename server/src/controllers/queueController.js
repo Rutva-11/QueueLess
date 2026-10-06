@@ -6,33 +6,47 @@ const {
     cancelEntry
 } = require("../services/queueService");
 
-function joinQueueController(req, res, next) {
+async function joinQueueController(req, res, next) {
     try {
-        const customerId = req.body && req.body.customerId;
+        const { userId, serviceId } = req.body || {};
 
-        if (!customerId || typeof customerId !== "string" || customerId.trim() === "") {
-            const error = new Error("Customer ID is required");
+        if (!userId || typeof userId !== "string" || userId.trim() === "") {
+            const error = new Error("User ID is required");
             error.statusCode = 400;
             throw error;
         }
 
-        const entry = joinQueue(customerId.trim());
+        if (!serviceId || typeof serviceId !== "string" || serviceId.trim() === "") {
+            const error = new Error("Service ID is required");
+            error.statusCode = 400;
+            throw error;
+        }
+
+        const entry = await joinQueue(userId.trim(), serviceId.trim());
         res.json(entry);
     } catch (error) {
         next(error);
     }
 }
 
-function callNextController(req, res, next) {
+async function callNextController(req, res, next) {
     try {
-        const entry = callNext();
+        const { serviceId } = req.body || {};
+
+        if (!serviceId || typeof serviceId !== "string" || serviceId.trim() === "") {
+            const error = new Error("Service ID is required");
+            error.statusCode = 400;
+            throw error;
+        }
+
+        const entry = await callNext(serviceId.trim());
         res.json(entry);
     } catch (error) {
         next(error);
     }
 }
 
-function startServingController(req, res, next) {
+async function startServingController(req, res, next) {
     try {
         const { id } = req.params;
 
@@ -42,14 +56,14 @@ function startServingController(req, res, next) {
             throw error;
         }
 
-        const entry = startServing(id.trim());
+        const entry = await startServing(id.trim());
         res.json(entry);
     } catch (error) {
         next(error);
     }
 }
 
-function completeEntryController(req, res, next) {
+async function completeEntryController(req, res, next) {
     try {
         const { id } = req.params;
 
@@ -59,14 +73,14 @@ function completeEntryController(req, res, next) {
             throw error;
         }
 
-        const entry = completeEntry(id.trim());
+        const entry = await completeEntry(id.trim());
         res.json(entry);
     } catch (error) {
         next(error);
     }
 }
 
-function cancelEntryController(req, res, next) {
+async function cancelEntryController(req, res, next) {
     try {
         const { id } = req.params;
 
@@ -76,7 +90,7 @@ function cancelEntryController(req, res, next) {
             throw error;
         }
 
-        const entry = cancelEntry(id.trim());
+        const entry = await cancelEntry(id.trim());
         res.json(entry);
     } catch (error) {
         next(error);
