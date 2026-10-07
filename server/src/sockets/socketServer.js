@@ -3,10 +3,31 @@ const { socketAuth } = require("../middlewares/socketAuthMiddleware");
 
 let io = null;
 
+function isAllowedOrigin(origin) {
+    if (!origin) return true;
+    if (process.env.CLIENT_ORIGIN) {
+        const configured = process.env.CLIENT_ORIGIN.split(",").map((o) => o.trim());
+        if (configured.includes(origin)) return true;
+    }
+    if (origin === "http://localhost:5173" || origin === "http://localhost:5174" || origin === "http://127.0.0.1:5173" || origin === "http://127.0.0.1:5174") {
+        return true;
+    }
+    if (process.env.NODE_ENV !== "production" && /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
+        return true;
+    }
+    return false;
+}
+
 function initSocketServer(httpServer) {
     io = new Server(httpServer, {
         cors: {
-            origin: "*",
+            origin: (origin, callback) => {
+                if (isAllowedOrigin(origin)) {
+                    callback(null, true);
+                } else {
+                    callback(new Error("Not allowed by CORS"));
+                }
+            },
             methods: ["GET", "POST"]
         }
     });

@@ -1,6 +1,7 @@
 const express = require("express");
 
 const {
+    getServicesController,
     joinQueueController,
     callNextController,
     startServingController,
@@ -15,7 +16,8 @@ const { requireRole } = require("../middlewares/roleMiddleware");
 
 const router = express.Router();
 
-// Read APIs (place /my before /:id to avoid route conflicts)
+// Read APIs
+router.get("/services", authenticate, getServicesController);
 router.get("/my", authenticate, getMyQueueEntryController);
 router.get("/service/:serviceId", authenticate, getServiceQueueController);
 

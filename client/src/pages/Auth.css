@@ -1,0 +1,188 @@
+/* ============================================================
+   Auth Pages — Editorial Design System
+   Shared by LoginPage and RegisterPage
+   ============================================================ */
+
+.auth-page {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2.5rem 1.25rem;
+    position: relative;
+    z-index: 1;
+}
+
+.auth-box {
+    width: 100%;
+    max-width: 390px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+    padding: 2.25rem 2rem;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 12px 32px -8px rgba(0, 0, 0, 0.5);
+}
+
+/* Brand */
+.auth-brand {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.15rem;
+    margin-bottom: 1.75rem;
+    padding-bottom: 1.25rem;
+    border-bottom: 1px solid var(--border-hairline);
+}
+
+.auth-wordmark {
+    font-size: 1.1rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    color: var(--text-primary);
+}
+
+.auth-tagline {
+    font-size: 0.72rem;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--text-tertiary);
+}
+
+/* Headings */
+.auth-title {
+    font-size: 1.5rem;
+    font-weight: 600;
+    letter-spacing: -0.03em;
+    color: var(--text-primary);
+    margin-bottom: 0.25rem;
+}
+
+.auth-subtitle {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    margin-bottom: 1.6rem;
+    line-height: 1.45;
+}
+
+/* Form */
+.auth-form {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+}
+
+.field-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+}
+
+.field-label {
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+}
+
+.field-input {
+    width: 100%;
+    background: var(--bg-surface-subtle);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    padding: 0.65rem 0.85rem;
+    font-family: var(--font-ui);
+    font-size: 0.88rem;
+    color: var(--text-primary);
+    outline: none;
+    transition: border-color var(--transition-fast), background var(--transition-fast);
+    -webkit-appearance: none;
+    appearance: none;
+}
+
+.field-input::placeholder {
+    color: var(--text-muted);
+}
+
+.field-input:focus {
+    border-color: var(--accent-brand-border);
+    background: var(--bg-surface-elevated);
+}
+
+.field-input:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.field-select {
+    cursor: pointer;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' fill='none'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%23a8a69f' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.85rem center;
+    padding-right: 2rem;
+}
+
+.field-select option {
+    background: #191918;
+    color: var(--text-primary);
+}
+
+/* Error banner */
+.auth-error {
+    font-size: 0.8rem;
+    color: #e59287;
+    background: var(--status-cancelled-bg);
+    border: 1px solid rgba(168, 101, 93, 0.25);
+    border-radius: var(--radius-sm);
+    padding: 0.6rem 0.85rem;
+    line-height: 1.4;
+}
+
+/* Primary Button */
+.auth-btn-primary {
+    width: 100%;
+    background: var(--text-primary);
+    color: var(--bg-canvas);
+    border: none;
+    border-radius: var(--radius-sm);
+    padding: 0.72rem 1.2rem;
+    font-family: var(--font-ui);
+    font-size: 0.88rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity var(--transition-fast), transform var(--transition-fast);
+    margin-top: 0.25rem;
+}
+
+.auth-btn-primary:hover:not(:disabled) {
+    opacity: 0.9;
+    transform: translateY(-1px);
+}
+
+.auth-btn-primary:active:not(:disabled) {
+    transform: translateY(0);
+}
+
+.auth-btn-primary:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+}
+
+/* Switch link */
+.auth-switch {
+    font-size: 0.82rem;
+    color: var(--text-tertiary);
+    text-align: center;
+}
+
+.auth-link {
+    color: var(--text-secondary);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+    transition: color var(--transition-fast);
+}
+
+.auth-link:hover {
+    color: var(--text-primary);
+}

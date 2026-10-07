@@ -1,0 +1,433 @@
+/* ============================================================
+   QueueLess Customer Dashboard
+   Calm digital waiting room with editorial aesthetics
+   ============================================================ */
+
+.customer-page-shell {
+    width: 100%;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+    z-index: 2;
+}
+
+.customer-view {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1.5rem;
+}
+
+/* ── Error Banner / Alert ─────────────────────────────────── */
+.dashboard-alert,
+.error-banner {
+    width: 100%;
+    max-width: 460px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    background: rgba(239, 68, 68, 0.08);
+    border: 1px solid rgba(239, 68, 68, 0.22);
+    border-radius: var(--radius-sm);
+    padding: 0.7rem 0.95rem;
+    font-size: 0.82rem;
+    color: #f87171;
+    line-height: 1.45;
+}
+
+.alert-dismiss-btn {
+    background: transparent;
+    border: none;
+    color: #f87171;
+    cursor: pointer;
+    font-size: 0.85rem;
+    padding: 0 0.25rem;
+    opacity: 0.75;
+    transition: opacity var(--transition-fast);
+}
+
+.alert-dismiss-btn:hover {
+    opacity: 1;
+}
+
+/* ── Loading State ────────────────────────────────────────── */
+.dashboard-loading,
+.view-loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    min-height: 240px;
+}
+
+.loading-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--text-muted);
+    animation: dotPulse 1.2s ease-in-out infinite;
+}
+
+.loading-dot:nth-child(2) { animation-delay: 0.2s; }
+.loading-dot:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes dotPulse {
+    0%, 60%, 100% { opacity: 0.2; transform: scale(0.85); }
+    30% { opacity: 1; transform: scale(1); }
+}
+
+/* ── Empty State / Take Ticket View ──────────────────────── */
+.waiting-room-empty {
+    width: 100%;
+    max-width: 460px;
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+}
+
+.empty-header {
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    margin-bottom: 0.25rem;
+}
+
+.empty-kicker {
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--text-tertiary);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+}
+
+.empty-title {
+    font-size: 1.85rem;
+    font-weight: 600;
+    letter-spacing: -0.03em;
+    color: var(--text-primary);
+}
+
+.empty-description {
+    font-size: 0.88rem;
+    color: var(--text-secondary);
+    line-height: 1.5;
+    max-width: 380px;
+    margin: 0 auto;
+}
+
+/* ── Service Selection ────────────────────────────────────── */
+.service-selection-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.65rem;
+    margin-top: 0.25rem;
+}
+
+.service-label {
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--text-tertiary);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+}
+
+.service-card-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.65rem;
+}
+
+.service-option-card {
+    width: 100%;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    padding: 0.95rem 1.15rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    cursor: pointer;
+    text-align: left;
+    font-family: var(--font-ui);
+    transition: all var(--transition-fast);
+    position: relative;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.service-option-card:hover {
+    border-color: var(--border-medium);
+    background: var(--bg-surface-subtle);
+}
+
+.service-option-card.is-selected {
+    border-color: var(--accent-brand-border);
+    background: var(--bg-surface-elevated);
+    box-shadow: 0 0 0 1px var(--accent-brand-border), 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+
+.service-option-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+}
+
+.service-option-name {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    letter-spacing: -0.01em;
+}
+
+.service-option-prefix {
+    font-size: 0.72rem;
+    color: var(--accent-brand);
+    background: var(--accent-brand-subtle);
+    border: 1px solid var(--accent-brand-border);
+    padding: 2px 7px;
+    border-radius: var(--radius-xs);
+    font-family: var(--font-mono);
+}
+
+.service-option-wait {
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+}
+
+/* Take ticket button */
+.btn-take-ticket {
+    width: 100%;
+    background: var(--text-primary);
+    color: var(--bg-canvas);
+    border: none;
+    border-radius: var(--radius-md);
+    padding: 0.85rem 1.5rem;
+    font-family: var(--font-ui);
+    font-size: 0.92rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity var(--transition-fast), transform var(--transition-fast);
+    margin-top: 0.5rem;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+}
+
+.btn-take-ticket:hover:not(:disabled) {
+    opacity: 0.9;
+    transform: translateY(-1px);
+}
+
+.btn-take-ticket:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+}
+
+/* ── Active Ticket View ───────────────────────────────────── */
+.ticket-active-view {
+    width: 100%;
+    max-width: 460px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1.25rem;
+}
+
+.call-notification-banner {
+    width: 100%;
+    background: rgba(181, 154, 106, 0.12);
+    border: 1px solid var(--accent-brand-border);
+    border-radius: var(--radius-md);
+    padding: 0.75rem 1rem;
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: var(--accent-brand);
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    box-shadow: 0 4px 12px rgba(181, 154, 106, 0.08);
+}
+
+.banner-pulse {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--accent-brand);
+    flex-shrink: 0;
+    animation: bannerPulseAnim 1.6s ease-in-out infinite;
+}
+
+@keyframes bannerPulseAnim {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.4; transform: scale(1.3); }
+}
+
+.view-ticket-hero {
+    width: 100%;
+}
+
+.view-progress {
+    width: 100%;
+}
+
+.ticket-action-bar {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border-hairline);
+    margin-top: 0.5rem;
+}
+
+.btn-cancel-ticket {
+    background: transparent;
+    border: none;
+    font-family: var(--font-ui);
+    font-size: 12px;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: color var(--transition-fast);
+}
+
+.btn-cancel-ticket:hover:not(:disabled) {
+    color: #ef4444;
+}
+
+.btn-cancel-ticket:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+/* Completed reset bar */
+.completed-reset-bar {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.75rem;
+    padding-top: 1rem;
+    text-align: center;
+}
+
+.completed-thank-you {
+    font-size: 0.88rem;
+    color: var(--text-secondary);
+}
+
+.btn-new-ticket {
+    background: var(--bg-surface-elevated);
+    border: 1px solid var(--border-subtle);
+    color: var(--text-primary);
+    border-radius: var(--radius-md);
+    padding: 0.65rem 1.25rem;
+    font-family: var(--font-ui);
+    font-size: 0.85rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.btn-new-ticket:hover {
+    border-color: var(--border-medium);
+    background: var(--bg-surface);
+}
+
+/* ── Leave Confirmation Dialog ────────────────────────────── */
+.modal-backdrop,
+.dialog-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(9, 9, 11, 0.82);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+    z-index: 100;
+}
+
+.modal-sheet,
+.dialog-box {
+    width: 100%;
+    max-width: 380px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    padding: 1.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6);
+}
+
+.modal-title,
+.dialog-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.modal-text,
+.dialog-desc {
+    font-size: 13px;
+    color: var(--text-secondary);
+    line-height: 1.5;
+}
+
+.modal-action-row,
+.dialog-buttons {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0.75rem;
+    margin-top: 0.5rem;
+}
+
+.modal-btn,
+.dialog-btn {
+    padding: 0.45rem 0.85rem;
+    font-size: 12px;
+    font-family: var(--font-ui);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.modal-btn.secondary,
+.dialog-btn.cancel {
+    background: transparent;
+    border: 1px solid var(--border-subtle);
+    color: var(--text-secondary);
+}
+
+.modal-btn.secondary:hover,
+.dialog-btn.cancel:hover {
+    color: var(--text-primary);
+    border-color: var(--border-medium);
+}
+
+.modal-btn.danger,
+.dialog-btn.confirm {
+    background: rgba(239, 68, 68, 0.12);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    color: #f87171;
+}
+
+.modal-btn.danger:hover,
+.dialog-btn.confirm:hover {
+    background: rgba(239, 68, 68, 0.22);
+}
+
+/* ── Responsive ───────────────────────────────────────────── */
+@media (max-width: 520px) {
+    .empty-title {
+        font-size: 1.6rem;
+    }
+    .service-option-card {
+        padding: 0.85rem 1rem;
+    }
+}

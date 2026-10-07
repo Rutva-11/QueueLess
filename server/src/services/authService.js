@@ -2,6 +2,80 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const User = require("../models/User");
 
+/**
+ * Customer Passwordless Check-in
+ * Reuses existing USER identity or creates a new one.
+ * Never allows passwordless access to STAFF or ADMIN accounts.
+ */
+async function customerCheckIn(name, email) {
+    if (!name || typeof name !== "string" || name.trim() === "") {
+        const error = new Error("Name is required");
+        error.statusCode = 400;
+        throw error;
+    }
+
+    if (!email || typeof email !== "string" || email.trim() === "") {
+        const error = new Error("Email is required");
+        error.statusCode = 400;
+        throw error;
+    }
+
+    const normalizedEmail = email.toLowerCase().trim();
+
+    let user = await User.findOne({ email: normalizedEmail });
+
+    if (user) {
+        // Prevent passwordless authentication for staff or admin accounts
+        if (user.role === "STAFF" || user.role === "ADMIN") {
+            const error = new Error("This email is registered as a staff account. Please use staff sign-in.");
+            error.statusCode = 403;
+            throw error;
+        }
+
+        // Update customer name if provided
+        if (name.trim() && user.name !== name.trim()) {
+            user.name = name.trim();
+            await user.save();
+        }
+    } else {
+        // Create new USER customer without password
+        user = await User.create({
+            name: name.trim(),
+            email: normalizedEmail,
+            role: "USER"
+        });
+    }
+
+    const jwtSecret = process.env.JWT_SECRET;
+    if (!jwtSecret) {
+        const error = new Error("Server configuration error: JWT_SECRET is missing");
+        error.statusCode = 500;
+        throw error;
+    }
+
+    const payload = {
+        userId: user._id,
+        role: user.role
+    };
+
+    const options = {};
+    if (process.env.JWT_EXPIRES_IN) {
+        options.expiresIn = process.env.JWT_EXPIRES_IN;
+    }
+
+    const token = jwt.sign(payload, jwtSecret, options);
+
+    return {
+        token,
+        user: {
+            id: user._id.toString(),
+            name: user.name,
+            email: user.email,
+            role: user.role
+        }
+    };
+}
+
 async function registerUser(name, email, password) {
     if (!name || typeof name !== "string" || name.trim() === "") {
         const error = new Error("Name is required");
@@ -68,6 +142,12 @@ async function loginUser(email, password) {
         throw error;
     }
 
+    if (!user.passwordHash) {
+        const error = new Error("Invalid email or password");
+        error.statusCode = 401;
+        throw error;
+    }
+
     const isMatch = await bcrypt.compare(password, user.passwordHash);
     if (!isMatch) {
         const error = new Error("Invalid email or password");
@@ -106,6 +186,7 @@ async function loginUser(email, password) {
 }
 
 module.exports = {
+    customerCheckIn,
     registerUser,
     loginUser
 };

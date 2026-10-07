@@ -1,0 +1,79 @@
+.queue-progress-flow {
+    width: 100%;
+    max-width: 440px;
+    margin: 1.5rem auto 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.progress-labels {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 0.72rem;
+    color: var(--text-tertiary);
+}
+
+.label-subtext {
+    color: var(--text-secondary);
+    font-weight: 500;
+}
+
+.progress-track-line {
+    position: relative;
+    width: 100%;
+    height: 2px;
+    background: rgba(241, 240, 234, 0.08);
+    border-radius: 2px;
+    margin-bottom: 1.25rem;
+}
+
+.progress-fill-line {
+    height: 100%;
+    background: rgba(241, 240, 234, 0.3);
+    border-radius: 2px;
+    transition: width var(--transition-smooth);
+}
+
+.progress-pin {
+    position: absolute;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    transition: left var(--transition-smooth);
+}
+
+.pin-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--text-primary);
+}
+
+.status-called .pin-dot {
+    background: var(--status-called);
+}
+
+.status-serving .pin-dot {
+    background: var(--status-serving);
+}
+
+.pin-tag {
+    position: absolute;
+    top: 10px;
+    font-size: 0.68rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    white-space: nowrap;
+}
+
+.status-called .pin-tag {
+    color: var(--status-called);
+}
+
+.status-serving .pin-tag {
+    color: var(--status-serving);
+}

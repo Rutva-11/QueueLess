@@ -8,38 +8,58 @@ const bcrypt = require("bcryptjs");
 const connectDB = require("../config/db");
 const User = require("../models/User");
 
-async function createStaffUser() {
+async function seedStaffUser() {
     try {
         await connectDB();
 
-        const email = "staff@example.com";
+        const email = (process.env.DEV_STAFF_EMAIL || "staff@example.com").trim().toLowerCase();
+        const role = (process.env.DEV_STAFF_ROLE || "STAFF").toUpperCase();
+        const password = process.env.DEV_STAFF_PASSWORD;
+
+        if (!password) {
+            console.error("\n❌ DEV_STAFF_PASSWORD environment variable is required.");
+            console.error("Usage: DEV_STAFF_PASSWORD=<password> npm run seed:staff");
+            console.error("Optional: DEV_STAFF_EMAIL=staff@example.com DEV_STAFF_ROLE=STAFF\n");
+            process.exit(1);
+        }
+
+        if (password.length < 6) {
+            console.error("\n❌ DEV_STAFF_PASSWORD must be at least 6 characters long.\n");
+            process.exit(1);
+        }
+
+        const salt = await bcrypt.genSalt(10);
+        const passwordHash = await bcrypt.hash(password, salt);
+
         let user = await User.findOne({ email });
 
         if (user) {
-            console.log("User already exists:");
+            user.passwordHash = passwordHash;
+            user.role = role;
+            if (!user.name) user.name = "Staff Member";
+            await user.save();
+            console.log("\n✅ Existing account updated for development staff testing:");
         } else {
-            const salt = await bcrypt.genSalt(10);
-            const passwordHash = await bcrypt.hash("Staff1234", salt);
-
             user = await User.create({
-                name: "Test Staff",
+                name: "Staff Member",
                 email,
                 passwordHash,
-                role: "STAFF"
+                role
             });
-            console.log("Staff user created successfully:");
+            console.log("\n✅ New staff account created for development testing:");
         }
 
         console.log({
-            _id: user._id,
+            id: user._id,
             email: user.email,
             role: user.role
         });
+        console.log("You can now sign in at /login using the provided credentials.\n");
 
         await mongoose.connection.close();
         process.exit(0);
     } catch (error) {
-        console.error("Error creating staff user:", error.message);
+        console.error("Error setting up staff user:", error.message);
         if (mongoose.connection.readyState !== 0) {
             await mongoose.connection.close();
         }
@@ -47,4 +67,4 @@ async function createStaffUser() {
     }
 }
 
-createStaffUser();
+seedStaffUser();

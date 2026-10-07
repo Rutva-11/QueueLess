@@ -79,20 +79,46 @@ async function joinQueue(userId, serviceId) {
         throw error;
     }
 
-    const lastEntry = await QueueEntry.findOne({ serviceId }).sort({ tokenNumber: -1 });
-    const tokenNumber = lastEntry ? lastEntry.tokenNumber + 1 : 1;
-    const prefix = service.tokenPrefix || "A";
+    // Baseline synchronization: if lastTokenNumber is uninitialized,
+    // synchronize it with max(tokenNumber) from existing entries in this service.
+    if (service.lastTokenNumber === undefined || service.lastTokenNumber === null) {
+        const lastEntry = await QueueEntry.findOne({ serviceId }).sort({ tokenNumber: -1 });
+        const baseline = lastEntry ? lastEntry.tokenNumber : 0;
+        await Service.updateOne(
+            { _id: serviceId, $or: [{ lastTokenNumber: { $exists: false } }, { lastTokenNumber: { $lt: baseline } }] },
+            { $set: { lastTokenNumber: baseline } }
+        );
+    }
+
+    // Atomic per-service token allocation using MongoDB $inc
+    const updatedService = await Service.findByIdAndUpdate(
+        serviceId,
+        { $inc: { lastTokenNumber: 1 } },
+        { returnDocument: "after" }
+    );
+
+    const tokenNumber = updatedService.lastTokenNumber;
+    const prefix = updatedService.tokenPrefix || "A";
     const tokenLabel = `${prefix}-${String(tokenNumber).padStart(3, "0")}`;
 
-    const entry = await QueueEntry.create({
-        serviceId,
-        userId,
-        tokenNumber,
-        tokenLabel,
-        status: "WAITING"
-    });
+    try {
+        const entry = await QueueEntry.create({
+            serviceId,
+            userId,
+            tokenNumber,
+            tokenLabel,
+            status: "WAITING"
+        });
 
-    return entry;
+        return entry;
+    } catch (err) {
+        if (err.code === 11000) {
+            const error = new Error("Customer already has an active queue entry");
+            error.statusCode = 409;
+            throw error;
+        }
+        throw err;
+    }
 }
 
 async function callNext(serviceId) {
@@ -280,7 +306,12 @@ async function getMyQueueEntry(userId) {
     return entry;
 }
 
+async function getAllServices() {
+    return await Service.find({ isActive: true }).select("_id name avgServiceMinutes tokenPrefix isActive").lean();
+}
+
 module.exports = {
+    getAllServices,
     joinQueue,
     callNext,
     startServing,

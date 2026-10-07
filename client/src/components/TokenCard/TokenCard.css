@@ -1,0 +1,211 @@
+.queue-ticket {
+    position: relative;
+    width: 100%;
+    max-width: 440px;
+    margin: 0 auto;
+    background: var(--bg-ticket);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+    box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.5);
+    overflow: hidden;
+    transition: border-color var(--transition-smooth);
+}
+
+/* State border accents — muted, no neon bloom */
+.queue-ticket.state-called {
+    border-color: var(--accent-brand-border);
+}
+
+.queue-ticket.state-serving {
+    border-color: rgba(114, 150, 118, 0.35);
+}
+
+.queue-ticket.state-cancelled {
+    opacity: 0.7;
+}
+
+/* Header */
+.ticket-header {
+    padding: 1.25rem 1.4rem 1rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+}
+
+.ticket-service-name {
+    font-size: 0.92rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    letter-spacing: -0.01em;
+}
+
+.ticket-status-pill {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 3px 8px;
+    background: var(--bg-surface-subtle);
+    border: 1px solid var(--border-hairline);
+    border-radius: 100px;
+}
+
+.ticket-status-dot {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.ticket-status-text {
+    font-size: 0.72rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+}
+
+/* Perforation Divider */
+.ticket-divider-strip {
+    position: relative;
+    width: 100%;
+    height: 16px;
+    display: flex;
+    align-items: center;
+    overflow: hidden;
+}
+
+.dashed-separator {
+    width: 100%;
+    height: 1px;
+    border-top: 1px dashed rgba(241, 240, 234, 0.1);
+}
+
+.notch {
+    position: absolute;
+    width: 12px;
+    height: 12px;
+    background: var(--bg-canvas);
+    border-radius: 50%;
+    border: 1px solid var(--border-subtle);
+    z-index: 2;
+}
+
+.notch-left {
+    left: -7px;
+}
+
+.notch-right {
+    right: -7px;
+}
+
+/* Ticket Hero Body */
+.ticket-body {
+    padding: 1.5rem 1.4rem 1.75rem;
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.ticket-eyebrow {
+    font-size: 0.75rem;
+    color: var(--text-tertiary);
+    font-weight: 500;
+    margin-bottom: 0.4rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.token-display {
+    font-size: 4.5rem;
+    font-weight: 700;
+    letter-spacing: -0.04em;
+    line-height: 1;
+    color: var(--text-primary);
+    margin-bottom: 1.15rem;
+}
+
+.state-called .token-display {
+    color: #f7e7c4; /* Soft warm ivory/parchment */
+}
+
+.ticket-status-message {
+    max-width: 320px;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.ticket-headline {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    letter-spacing: -0.01em;
+}
+
+.ticket-subtext {
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+    line-height: 1.45;
+}
+
+/* Details Row */
+.ticket-details-row {
+    padding: 1.1rem 1.4rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: var(--bg-surface);
+    border-top: 1px solid var(--border-hairline);
+}
+
+.detail-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.2rem;
+    flex: 1;
+}
+
+.detail-label {
+    font-size: 0.72rem;
+    color: var(--text-tertiary);
+    font-weight: 400;
+}
+
+.detail-value {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    letter-spacing: -0.01em;
+}
+
+.detail-divider {
+    width: 1px;
+    height: 24px;
+    background: var(--border-hairline);
+}
+
+/* Footer */
+.ticket-footer {
+    padding: 0.65rem 1.4rem;
+    border-top: 1px solid var(--border-hairline);
+    background: var(--bg-surface-subtle);
+    text-align: center;
+}
+
+.ticket-issued-text {
+    font-size: 0.72rem;
+    color: var(--text-muted);
+}
+
+@media (max-width: 480px) {
+    .token-display {
+        font-size: 3.75rem;
+    }
+    .ticket-header,
+    .ticket-body,
+    .ticket-details-row {
+        padding-left: 1.1rem;
+        padding-right: 1.1rem;
+    }
+}

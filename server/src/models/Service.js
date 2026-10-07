@@ -25,6 +25,10 @@ const serviceSchema = new mongoose.Schema(
             type: String,
             default: "A",
             trim: true
+        },
+        lastTokenNumber: {
+            type: Number,
+            default: 0
         }
     },
     {

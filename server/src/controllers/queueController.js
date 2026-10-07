@@ -1,4 +1,5 @@
 const {
+    getAllServices,
     joinQueue,
     callNext,
     startServing,
@@ -15,6 +16,15 @@ const {
     emitQueueCompleted,
     emitQueueCancelled
 } = require("../sockets/queueEmitter");
+
+async function getServicesController(req, res, next) {
+    try {
+        const services = await getAllServices();
+        res.json(services);
+    } catch (error) {
+        next(error);
+    }
+}
 
 async function joinQueueController(req, res, next) {
     try {
@@ -151,6 +161,7 @@ async function getMyQueueEntryController(req, res, next) {
 }
 
 module.exports = {
+    getServicesController,
     joinQueueController,
     callNextController,
     startServingController,

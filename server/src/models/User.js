@@ -16,7 +16,12 @@ const userSchema = new mongoose.Schema(
         },
         passwordHash: {
             type: String,
-            required: [true, "Password hash is required"]
+            required: [
+                function () {
+                    return this.role === "STAFF" || this.role === "ADMIN";
+                },
+                "Password hash is required for staff and admin accounts"
+            ]
         },
         role: {
             type: String,

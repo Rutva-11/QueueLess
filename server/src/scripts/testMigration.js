@@ -31,7 +31,8 @@ async function runTestSuite() {
         }
 
         // Clean up previous test entries for clean run
-        await QueueEntry.deleteMany({ userId: { $in: [user1._id, user2._id, user3._id] } });
+        await QueueEntry.deleteMany({ serviceId: service._id });
+        await Service.updateOne({ _id: service._id }, { $set: { lastTokenNumber: 0 } });
 
         const queueService = require("../services/queueService");
 

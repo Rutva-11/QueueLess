@@ -46,4 +46,9 @@ queueEntrySchema.index(
     }
 );
 
+queueEntrySchema.index(
+    { serviceId: 1, tokenNumber: 1 },
+    { unique: true }
+);
+
 module.exports = mongoose.model("QueueEntry", queueEntrySchema);
