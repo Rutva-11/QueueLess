@@ -287,6 +287,15 @@ QueueLess/
 *Directory names are illustrative; consult the repository for the exact current file layout.*
 
 ---
+## Demo Staff Login
+
+Want to explore the restaurant host dashboard? Use the demo staff account to try managing the waiting list, calling parties, seating guests, and clearing completed tables.
+
+- **Staff Login:** [Open the host sign-in page](https://queue-less-beta.vercel.app/login)
+- **Email:** `staff@example.com`
+- **Password:** Use the demo password provided by the project maintainer.
+
+**Note:** The live demo uses a shared account. Please avoid entering sensitive or personal information, and do not change account settings or interfere with other users' demo sessions.
 
 ## Getting Started
 
