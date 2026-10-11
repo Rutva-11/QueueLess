@@ -29,6 +29,23 @@ const queueEntrySchema = new mongoose.Schema(
         counterId: {
             type: String,
             default: null
+        },
+        calledAt: {
+            type: Date,
+            default: null
+        },
+        servedAt: {
+            type: Date,
+            default: null
+        },
+        completedAt: {
+            type: Date,
+            default: null
+        },
+        partySize: {
+            type: Number,
+            default: 2,
+            min: 1
         }
     },
     {

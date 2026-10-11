@@ -101,13 +101,22 @@ async function joinQueue(userId, serviceId) {
     const prefix = updatedService.tokenPrefix || "A";
     const tokenLabel = `${prefix}-${String(tokenNumber).padStart(3, "0")}`;
 
+    let partySize = 2;
+    if (user && user.name) {
+        const sizeMatch = user.name.match(/\((?:party\s+of\s+)?(\d+)\)/i) || user.name.match(/(?:party\s+of\s+)(\d+)/i);
+        if (sizeMatch && sizeMatch[1]) {
+            partySize = parseInt(sizeMatch[1], 10);
+        }
+    }
+
     try {
         const entry = await QueueEntry.create({
             serviceId,
             userId,
             tokenNumber,
             tokenLabel,
-            status: "WAITING"
+            status: "WAITING",
+            partySize
         });
 
         return entry;
@@ -156,6 +165,39 @@ async function callNext(serviceId) {
     }
 
     entry.status = "CALLED";
+    entry.calledAt = new Date();
+    await entry.save();
+
+    return entry;
+}
+
+async function callSpecific(entryId) {
+    let entry;
+    try {
+        entry = await QueueEntry.findById(entryId);
+    } catch (err) {
+        if (err.name === "CastError") {
+            const error = new Error("Queue entry not found");
+            error.statusCode = 404;
+            throw error;
+        }
+        throw err;
+    }
+
+    if (!entry) {
+        const error = new Error("Queue entry not found");
+        error.statusCode = 404;
+        throw error;
+    }
+
+    if (!canTransition(entry.status, "CALLED")) {
+        const error = new Error("Invalid status transition");
+        error.statusCode = 409;
+        throw error;
+    }
+
+    entry.status = "CALLED";
+    entry.calledAt = new Date();
     await entry.save();
 
     return entry;
@@ -187,6 +229,7 @@ async function startServing(entryId) {
     }
 
     entry.status = "SERVING";
+    entry.servedAt = new Date();
     await entry.save();
 
     return entry;
@@ -218,6 +261,7 @@ async function completeEntry(entryId) {
     }
 
     entry.status = "COMPLETED";
+    entry.completedAt = new Date();
     await entry.save();
 
     return entry;
@@ -310,13 +354,65 @@ async function getAllServices() {
     return await Service.find({ isActive: true }).select("_id name avgServiceMinutes tokenPrefix isActive").lean();
 }
 
+async function getServiceHistory(serviceId, limit = 20) {
+    let service;
+    try {
+        service = await Service.findById(serviceId);
+    } catch (err) {
+        if (err.name === "CastError") {
+            const error = new Error("Service not found");
+            error.statusCode = 404;
+            throw error;
+        }
+        throw err;
+    }
+
+    if (!service) {
+        const error = new Error("Service not found");
+        error.statusCode = 404;
+        throw error;
+    }
+
+    const safeLimit = Math.min(Math.max(parseInt(limit, 10) || 20, 1), 100);
+
+    const history = await QueueEntry.find({
+        serviceId,
+        status: "COMPLETED"
+    })
+        .sort({ completedAt: -1, updatedAt: -1 })
+        .limit(safeLimit)
+        .populate({ path: "userId", select: "name email" })
+        .populate({ path: "serviceId", select: "name tokenPrefix avgServiceMinutes" })
+        .lean();
+
+    // Start of current calendar day in server local timezone
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+
+    const clearedTodayCount = await QueueEntry.countDocuments({
+        serviceId,
+        status: "COMPLETED",
+        $or: [
+            { completedAt: { $gte: startOfToday } },
+            { completedAt: null, updatedAt: { $gte: startOfToday } }
+        ]
+    });
+
+    return {
+        history,
+        clearedTodayCount
+    };
+}
+
 module.exports = {
     getAllServices,
     joinQueue,
     callNext,
+    callSpecific,
     startServing,
     completeEntry,
     cancelEntry,
     getServiceQueue,
-    getMyQueueEntry
+    getMyQueueEntry,
+    getServiceHistory
 };

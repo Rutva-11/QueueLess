@@ -14,24 +14,15 @@ const STATUS_LABELS = {
     CANCELLED: "Removed",
 };
 
-function StatusDot({ status }) {
-    return (
-        <span
-            className={`sdot sdot--${status.toLowerCase()}`}
-            aria-label={STATUS_LABELS[status] || status}
-        />
-    );
-}
-
 function StatusText({ status }) {
     return (
-        <span className={`stext stext--${status.toLowerCase()}`}>
+        <span className={`stext stext--${status ? status.toLowerCase() : "waiting"}`}>
             {STATUS_LABELS[status] || status}
         </span>
     );
 }
 
-/* ─── Helpers ──────────────────────────────────────────── */
+/* ─── Time formatting helpers ──────────────────────────── */
 function fmtTime(iso) {
     if (!iso) return "—";
     return new Date(iso).toLocaleTimeString("en-IN", {
@@ -40,14 +31,43 @@ function fmtTime(iso) {
     });
 }
 
-function getCustomerName(entry) {
-    if (!entry) return "—";
-    const u = entry.userId;
-    if (typeof u === "object" && u !== null) return u.name || u.email || "Party";
-    return "Party";
+function getElapsedSeating(iso, now) {
+    if (!iso) return "Seated";
+    const diffMs = (now || Date.now()) - new Date(iso).getTime();
+    if (diffMs < 0) return "< 1m seated";
+    const mins = Math.floor(diffMs / 60000);
+    if (mins < 1) return "< 1m seated";
+    if (mins < 60) return `${mins}m seated`;
+    const hrs = Math.floor(mins / 60);
+    const remMins = mins % 60;
+    return remMins > 0 ? `${hrs}h ${remMins}m seated` : `${hrs}h seated`;
 }
 
-/* ─── Component ────────────────────────────────────────── */
+function getPartyInfo(entry) {
+    if (!entry) return { name: "Guest Party", size: 2, displaySize: "2 guests" };
+    const u = entry.userId;
+    const rawName = (typeof u === "object" && u !== null)
+        ? (u.name || u.email || "Guest Party")
+        : (entry.name || "Guest Party");
+
+    let size = entry.partySize;
+    const sizeMatch = rawName.match(/\((?:party\s+of\s+)?(\d+)\)/i) || rawName.match(/(?:party\s+of\s+)(\d+)/i);
+    if (sizeMatch && sizeMatch[1]) {
+        size = parseInt(sizeMatch[1], 10);
+    } else if (!size || typeof size !== "number" || size < 1) {
+        size = 2;
+    }
+
+    const cleanName = rawName.replace(/\s*\((?:party\s+of\s+)?\d+\)\s*/gi, "").trim() || rawName;
+
+    return {
+        name: cleanName,
+        size,
+        displaySize: size === 1 ? "1 guest" : `${size} guests`
+    };
+}
+
+/* ─── Main Component ───────────────────────────────────── */
 export default function StaffDashboard() {
     const { user, logout } = useAuth();
     const { socket, connected } = useSocket();
@@ -55,14 +75,38 @@ export default function StaffDashboard() {
 
     const DEMO_SERVICE_ID = import.meta.env.VITE_DEMO_SERVICE_ID || null;
 
-    const [_services, setServices] = useState([]);
+    const [services, setServices] = useState([]);
     const [serviceId, setServiceId] = useState(DEMO_SERVICE_ID || "");
     const [serviceName, setServiceName] = useState("Main Dining");
+    const [avgServiceMinutes, setAvgServiceMinutes] = useState(15);
 
     const [queue, setQueue] = useState([]);
+    const [history, setHistory] = useState([]);
+    const [clearedTodayCount, setClearedTodayCount] = useState(0);
+
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
     const [actionLoading, setActionLoading] = useState({});
+    const [now, setNow] = useState(() => Date.now());
+
+    /* ── Live elapsed clock ticker (every 30 seconds) ─────── */
+    useEffect(() => {
+        const timer = setInterval(() => setNow(Date.now()), 30000);
+        return () => clearInterval(timer);
+    }, []);
+
+    /* ── Listen for auth expiration ──────────────────────── */
+    useEffect(() => {
+        const handleAuthExpired = () => {
+            logout();
+            navigate("/login", {
+                replace: true,
+                state: { message: "Your session has expired. Please sign in again." }
+            });
+        };
+        window.addEventListener("auth:expired", handleAuthExpired);
+        return () => window.removeEventListener("auth:expired", handleAuthExpired);
+    }, [logout, navigate]);
 
     /* ── Load available services ─────────────────────────── */
     useEffect(() => {
@@ -74,59 +118,148 @@ export default function StaffDashboard() {
                 if (!serviceId && list.length > 0) {
                     setServiceId(list[0]._id);
                     setServiceName(list[0].name);
-                } else {
+                    setAvgServiceMinutes(list[0].avgServiceMinutes || 15);
+                } else if (serviceId) {
                     const found = list.find((s) => s._id === serviceId);
-                    if (found) setServiceName(found.name);
+                    if (found) {
+                        setServiceName(found.name);
+                        setAvgServiceMinutes(found.avgServiceMinutes || 15);
+                    }
                 }
             })
-            .catch(() => {});
-    }, [serviceId]);
+            .catch((err) => {
+                if (err?.response?.status === 401) {
+                    logout();
+                    navigate("/login", {
+                        replace: true,
+                        state: { message: "Your session has expired. Please sign in again." }
+                    });
+                }
+            });
+    }, [serviceId, logout, navigate]);
 
-    /* ── Fetch queue for the selected service ────────────── */
-    const fetchQueue = useCallback(async (showSpinner = false) => {
+    /* ── Fetch active queue and completed history ────────── */
+    const fetchAuthoritativeState = useCallback(async (showSpinner = false) => {
         if (!serviceId) {
             setError("No service selected. Set VITE_DEMO_SERVICE_ID in client/.env.");
             setLoading(false);
             return;
         }
         if (showSpinner) setLoading(true);
+
         try {
             setError("");
-            const res = await queueAPI.serviceQueue(serviceId);
-            // API returns a plain array
-            const raw = Array.isArray(res.data) ? res.data : [];
-            setQueue(raw);
+            const [queueRes, historyRes] = await Promise.allSettled([
+                queueAPI.serviceQueue(serviceId),
+                queueAPI.history(serviceId, 20)
+            ]);
+
+            if (queueRes.status === "fulfilled") {
+                const rawQueue = Array.isArray(queueRes.value?.data) ? queueRes.value.data : [];
+                setQueue(rawQueue);
+            } else {
+                const errStatus = queueRes.reason?.response?.status;
+                if (errStatus === 401) {
+                    logout();
+                    navigate("/login", {
+                        replace: true,
+                        state: { message: "Your session has expired. Please sign in again." }
+                    });
+                    return;
+                }
+                throw queueRes.reason;
+            }
+
+            if (historyRes.status === "fulfilled") {
+                const histData = historyRes.value?.data || {};
+                setHistory(Array.isArray(histData.history) ? histData.history : []);
+                setClearedTodayCount(typeof histData.clearedTodayCount === "number" ? histData.clearedTodayCount : 0);
+            } else {
+                const errStatus = historyRes.reason?.response?.status;
+                if (errStatus === 401) {
+                    logout();
+                    navigate("/login", {
+                        replace: true,
+                        state: { message: "Your session has expired. Please sign in again." }
+                    });
+                    return;
+                }
+            }
         } catch (err) {
-            setError(
-                err?.response?.data?.message ||
-                    err?.response?.data?.error ||
-                    "Failed to load the waiting list. Please try again."
-            );
+            const errStatus = err?.response?.status;
+            if (errStatus === 401) {
+                logout();
+                navigate("/login", {
+                    replace: true,
+                    state: { message: "Your session has expired. Please sign in again." }
+                });
+                return;
+            }
+
+            // If we already have queue data and hit a transient network glitch, preserve the existing queue view
+            setQueue((prevQueue) => {
+                if (prevQueue.length > 0) {
+                    setError("Connection interrupted. Reconnecting to live queue…");
+                    return prevQueue;
+                }
+                setError(
+                    err?.response?.data?.message ||
+                        err?.response?.data?.error ||
+                        "Failed to load queue data. Please try again."
+                );
+                return [];
+            });
         } finally {
             setLoading(false);
         }
-    }, [serviceId]);
+    }, [serviceId, logout, navigate]);
 
     useEffect(() => {
-        fetchQueue(true);
-    }, [fetchQueue]);
+        fetchAuthoritativeState(true);
+    }, [fetchAuthoritativeState]);
 
-    /* ── Socket real-time refresh ────────────────────────── */
+    /* ── Socket real-time synchronization ────────────────── */
     useEffect(() => {
-        if (!socket) return;
-        const refresh = () => fetchQueue();
-        const events = ["queue:joined", "queue:called", "queue:started", "queue:completed", "queue:cancelled"];
+        if (!socket || !serviceId) return;
+
+        // Subscribe to this dining area's service room for live updates
+        socket.emit("join:service", serviceId);
+
+        const refresh = () => fetchAuthoritativeState(false);
+
+        const events = [
+            "queue:joined",
+            "queue:called",
+            "queue:started",
+            "queue:completed",
+            "queue:cancelled",
+            "queue:updated",
+            "connect"
+        ];
+
         events.forEach((e) => socket.on(e, refresh));
-        return () => events.forEach((e) => socket.off(e, refresh));
-    }, [socket, fetchQueue]);
+        return () => {
+            socket.emit("leave:service", serviceId);
+            events.forEach((e) => socket.off(e, refresh));
+        };
+    }, [socket, serviceId, fetchAuthoritativeState]);
 
     /* ── Action helpers ──────────────────────────────────── */
     const withLoading = useCallback(async (key, fn) => {
         setActionLoading((prev) => ({ ...prev, [key]: true }));
         try {
             await fn();
-            await fetchQueue();
+            await fetchAuthoritativeState(false);
         } catch (err) {
+            const errStatus = err?.response?.status;
+            if (errStatus === 401) {
+                logout();
+                navigate("/login", {
+                    replace: true,
+                    state: { message: "Your session has expired. Please sign in again." }
+                });
+                return;
+            }
             setError(
                 err?.response?.data?.message ||
                     err?.response?.data?.error ||
@@ -135,10 +268,13 @@ export default function StaffDashboard() {
         } finally {
             setActionLoading((prev) => ({ ...prev, [key]: false }));
         }
-    }, [fetchQueue]);
+    }, [fetchAuthoritativeState, logout, navigate]);
 
     const handleCallNext = () =>
         withLoading("call-next", () => queueAPI.callNext(serviceId));
+
+    const handleCallParty = (entryId) =>
+        withLoading(entryId, () => queueAPI.callParty(entryId));
 
     const handleStart = (entryId) =>
         withLoading(entryId, () => queueAPI.startServing(entryId));
@@ -149,27 +285,31 @@ export default function StaffDashboard() {
     const handleCancel = (entryId) =>
         withLoading(entryId, () => queueAPI.cancel(entryId));
 
+    const handleSelectService = (id) => {
+        const found = services.find((s) => s._id === id);
+        if (found) {
+            setServiceId(found._id);
+            setServiceName(found.name);
+            setAvgServiceMinutes(found.avgServiceMinutes || 15);
+        }
+    };
+
     const handleLogout = () => {
         logout();
         navigate("/login");
     };
 
     /* ── Derived queue segments ──────────────────────────── */
-    const serving = queue.filter((e) => e.status === "SERVING");
-    const called  = queue.filter((e) => e.status === "CALLED");
     const waiting = queue.filter((e) => e.status === "WAITING");
-    const past    = queue.filter((e) => ["COMPLETED", "CANCELLED"].includes(e.status));
+    const called = queue.filter((e) => e.status === "CALLED");
+    const serving = queue.filter((e) => e.status === "SERVING");
 
-    // "Current" is whoever is SERVING, then CALLED if none serving
-    const current = serving[0] || called[0] || null;
-    // Next in line: first WAITING, or remaining CALLED entries
-    const nextUp = waiting[0] || null;
-    // All waiting shown in the list
-    const waitingList = waiting;
-    const calledList  = called.filter((e) => e !== current);
+    // Table-ready party (first CALLED entry)
+    const primaryCalled = called[0] || null;
+    const additionalCalled = called.slice(1);
 
     const waitingCount = waiting.length;
-    const canCallNext  = !!serviceId && waitingCount > 0 && !actionLoading["call-next"];
+    const canCallNext = !!serviceId && waitingCount > 0 && !actionLoading["call-next"];
 
     /* ── Render ──────────────────────────────────────────── */
     return (
@@ -179,7 +319,22 @@ export default function StaffDashboard() {
                 <div className="sd-topbar-left">
                     <span className="sd-wordmark">The Garden Table</span>
                     <span className="sd-sep" aria-hidden>·</span>
-                    <span className="sd-service-label">{serviceName}</span>
+                    {services.length > 1 ? (
+                        <select
+                            className="sd-service-select"
+                            value={serviceId}
+                            onChange={(e) => handleSelectService(e.target.value)}
+                            aria-label="Dining area"
+                        >
+                            {services.map((s) => (
+                                <option key={s._id} value={s._id}>
+                                    {s.name}
+                                </option>
+                            ))}
+                        </select>
+                    ) : (
+                        <span className="sd-service-label">{serviceName}</span>
+                    )}
                 </div>
                 <div className="sd-topbar-right">
                     <span
@@ -204,7 +359,7 @@ export default function StaffDashboard() {
 
             {/* ── Page body ───────────────────────────────── */}
             <main className="sd-main">
-                {/* ── Stats row ──────────────────────────── */}
+                {/* ── A. Operational summary ───────────────── */}
                 <div className="sd-stats-row">
                     <div className="sd-stat">
                         <span className="sd-stat-value">{waitingCount}</span>
@@ -219,7 +374,7 @@ export default function StaffDashboard() {
                         <span className="sd-stat-label">seated</span>
                     </div>
                     <div className="sd-stat sd-stat--faded">
-                        <span className="sd-stat-value">{past.length}</span>
+                        <span className="sd-stat-value">{clearedTodayCount}</span>
                         <span className="sd-stat-label">cleared today</span>
                     </div>
                 </div>
@@ -238,73 +393,125 @@ export default function StaffDashboard() {
                     </div>
                 )}
 
-                {/* ── Two-column layout ──────────────────── */}
+                {/* ── Two-column body ────────────────────── */}
                 <div className="sd-body">
-                    {/* ── LEFT: Current Table + Primary action ─── */}
+                    {/* ══════════════════════════════════════════════
+                        LEFT COLUMN: Table Ready & Waiting List
+                       ══════════════════════════════════════════════ */}
                     <div className="sd-panel sd-panel--left">
-                        {/* Current table block */}
+                        {/* ── B. Current Table-Ready Party ── */}
                         <section className="sd-current-block">
-                            <p className="sd-section-eyebrow">Current table</p>
+                            <div className="sd-block-header">
+                                <p className="sd-section-eyebrow">
+                                    Table ready
+                                    {called.length > 0 && (
+                                        <span className="sd-count-badge sd-count-badge--called">
+                                            {called.length}
+                                        </span>
+                                    )}
+                                </p>
+                            </div>
 
                             {loading ? (
                                 <LoadingDots />
-                            ) : current ? (
-                                <div className="sd-current-card">
-                                    <div className="sd-current-token">
-                                        {current.tokenLabel || `#${current.tokenNumber}`}
-                                    </div>
-                                    <div className="sd-current-meta">
-                                        <span className="sd-current-name">
-                                            {getCustomerName(current)}
-                                        </span>
-                                        <StatusText status={current.status} />
-                                    </div>
-                                    <p className="sd-current-time">
-                                        {current.status === "CALLED" && "Table ready · Awaiting guests"}
-                                        {current.status === "SERVING" && "Seated · Meal in progress"}
-                                        {["WAITING"].includes(current.status) && `Joined list at ${fmtTime(current.createdAt)}`}
-                                    </p>
+                            ) : primaryCalled ? (
+                                (() => {
+                                    const primaryParty = getPartyInfo(primaryCalled);
+                                    return (
+                                        <div className="sd-current-card">
+                                            <div className="sd-current-token">
+                                                {primaryCalled.tokenLabel || `#${primaryCalled.tokenNumber}`}
+                                            </div>
+                                            <div className="sd-current-meta">
+                                                <span className="sd-current-name">
+                                                    {primaryParty.name}
+                                                </span>
+                                                <span className="sd-party-size-pill">
+                                                    {primaryParty.displaySize}
+                                                </span>
+                                                <StatusText status={primaryCalled.status} />
+                                            </div>
+                                            <p className="sd-current-time">
+                                                Table ready · Awaiting guests at host stand
+                                                {primaryCalled.calledAt && ` · Called ${fmtTime(primaryCalled.calledAt)}`}
+                                            </p>
 
-                                    {/* Per-entry actions */}
-                                    <div className="sd-current-actions">
-                                        {current.status === "CALLED" && (
-                                            <button
-                                                className="sd-btn sd-btn--primary"
-                                                id="staff-start-btn"
-                                                onClick={() => handleStart(current._id)}
-                                                disabled={!!actionLoading[current._id]}
-                                            >
-                                                {actionLoading[current._id] ? "…" : "Seat guests"}
-                                            </button>
-                                        )}
-                                        {current.status === "SERVING" && (
-                                            <button
-                                                className="sd-btn sd-btn--primary"
-                                                id="staff-complete-btn"
-                                                onClick={() => handleComplete(current._id)}
-                                                disabled={!!actionLoading[current._id]}
-                                            >
-                                                {actionLoading[current._id] ? "…" : "Clear table"}
-                                            </button>
-                                        )}
-                                        {["WAITING", "CALLED", "SERVING"].includes(current.status) && (
-                                            <button
-                                                className="sd-btn sd-btn--cancel"
-                                                id="staff-cancel-current-btn"
-                                                onClick={() => handleCancel(current._id)}
-                                                disabled={!!actionLoading[current._id]}
-                                            >
-                                                {actionLoading[current._id] ? "…" : "Remove from list"}
-                                            </button>
-                                        )}
-                                    </div>
-                                </div>
+                                            {/* Action buttons */}
+                                            <div className="sd-current-actions">
+                                                <button
+                                                    className="sd-btn sd-btn--primary"
+                                                    id="staff-start-btn"
+                                                    onClick={() => handleStart(primaryCalled._id)}
+                                                    disabled={!!actionLoading[primaryCalled._id]}
+                                                >
+                                                    {actionLoading[primaryCalled._id] ? "Seating guests…" : "Seat guests"}
+                                                </button>
+                                                <button
+                                                    className="sd-btn sd-btn--cancel"
+                                                    id="staff-cancel-current-btn"
+                                                    onClick={() => handleCancel(primaryCalled._id)}
+                                                    disabled={!!actionLoading[primaryCalled._id]}
+                                                >
+                                                    {actionLoading[primaryCalled._id] ? "Removing…" : "Remove from list"}
+                                                </button>
+                                            </div>
+
+                                            {/* Additional called parties if any */}
+                                            {additionalCalled.length > 0 && (
+                                                <div className="sd-subcalled-group">
+                                                    <p className="sd-subcalled-title">Also table ready:</p>
+                                                    {additionalCalled.map((party) => {
+                                                        const subParty = getPartyInfo(party);
+                                                        return (
+                                                            <div key={party._id} className="sd-subcalled-row">
+                                                                <span className="sd-row-token font-mono">
+                                                                    {party.tokenLabel || `#${party.tokenNumber}`}
+                                                                </span>
+                                                                <div className="sd-subcalled-meta">
+                                                                    <span className="sd-subcalled-name">{subParty.name}</span>
+                                                                    <span className="sd-party-size-tag">{subParty.displaySize}</span>
+                                                                </div>
+                                                                <div className="sd-subcalled-actions">
+                                                                    <button
+                                                                        className="sd-action-btn sd-action-btn--start"
+                                                                        onClick={() => handleStart(party._id)}
+                                                                        disabled={!!actionLoading[party._id]}
+                                                                    >
+                                                                        {actionLoading[party._id] ? "…" : "Seat"}
+                                                                    </button>
+                                                                    <button
+                                                                        className="sd-action-btn sd-action-btn--cancel"
+                                                                        onClick={() => handleCancel(party._id)}
+                                                                        disabled={!!actionLoading[party._id]}
+                                                                    >
+                                                                        {actionLoading[party._id] ? "…" : "Remove"}
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                            )}
+                                        </div>
+                                    );
+                                })()
                             ) : (
                                 <div className="sd-current-empty">
-                                    <p className="sd-empty-primary">No table currently active.</p>
+                                    <p className="sd-empty-primary">No table currently awaiting seating.</p>
                                     <p className="sd-empty-secondary">
-                                        Call the next party from the waiting list to begin.
+                                        {waitingCount > 0
+                                            ? `${waitingCount} ${waitingCount === 1 ? "party" : "parties"} waiting. Call the next party when a table is prepared.`
+                                            : "Waiting list is clear. Walk-in guests will appear when they join."}
                                     </p>
+                                    <button
+                                        className="sd-btn sd-btn--call-next sd-btn--call-empty"
+                                        id="staff-call-next-empty-btn"
+                                        onClick={handleCallNext}
+                                        disabled={!canCallNext}
+                                        title={waitingCount === 0 ? "No parties waiting in queue" : "Call next party"}
+                                    >
+                                        {actionLoading["call-next"] ? "Calling…" : "Call next party"}
+                                    </button>
                                 </div>
                             )}
                         </section>
@@ -312,40 +519,7 @@ export default function StaffDashboard() {
                         {/* Divider */}
                         <div className="sd-divider" />
 
-                        {/* Call next party block */}
-                        <section className="sd-call-block">
-                            {nextUp ? (
-                                <div className="sd-next-preview">
-                                    <p className="sd-section-eyebrow">Next party</p>
-                                    <div className="sd-next-row">
-                                        <span className="sd-next-token font-mono">
-                                            {nextUp.tokenLabel || `#${nextUp.tokenNumber}`}
-                                        </span>
-                                        <span className="sd-next-name">
-                                            {getCustomerName(nextUp)}
-                                        </span>
-                                        <StatusText status={nextUp.status} />
-                                    </div>
-                                </div>
-                            ) : (
-                                <p className="sd-section-eyebrow">
-                                    {loading ? "" : "Waiting list is clear"}
-                                </p>
-                            )}
-
-                            <button
-                                className="sd-btn sd-btn--call-next"
-                                id="staff-call-next-btn"
-                                onClick={handleCallNext}
-                                disabled={!canCallNext}
-                            >
-                                {actionLoading["call-next"] ? "Calling…" : "Call next party"}
-                            </button>
-                        </section>
-                    </div>
-
-                    {/* ── RIGHT: Waiting list ───────── */}
-                    <div className="sd-panel sd-panel--right">
+                        {/* ── C. Waiting list ─────────────── */}
                         <section className="sd-queue-list-section">
                             <header className="sd-queue-list-header">
                                 <p className="sd-section-eyebrow">
@@ -354,67 +528,210 @@ export default function StaffDashboard() {
                                         <span className="sd-count-badge">{waitingCount}</span>
                                     )}
                                 </p>
+                                <button
+                                    className="sd-btn-compact-call"
+                                    id="staff-call-next-btn"
+                                    onClick={handleCallNext}
+                                    disabled={!canCallNext}
+                                    title={waitingCount === 0 ? "No parties waiting in queue" : "Call next party"}
+                                >
+                                    {actionLoading["call-next"] ? "Calling…" : "Call next party"}
+                                </button>
                             </header>
 
                             {loading ? (
                                 <LoadingDots />
-                            ) : waitingList.length === 0 && calledList.length === 0 ? (
+                            ) : waiting.length === 0 ? (
                                 <div className="sd-empty-state">
-                                    <p className="sd-empty-primary">No parties waiting.</p>
+                                    <p className="sd-empty-primary">Waiting list is clear.</p>
                                     <p className="sd-empty-secondary">
-                                        Walk-in guests will appear here when they join the waiting list.
+                                        Walk-in guests will appear here as soon as they join the waiting list.
                                     </p>
                                 </div>
                             ) : (
                                 <div className="sd-queue-rows">
-                                    {/* Called entries not yet serving */}
-                                    {calledList.map((entry) => (
-                                        <QueueRow
-                                            key={entry._id}
-                                            entry={entry}
-                                            busy={!!actionLoading[entry._id]}
-                                            onStart={handleStart}
-                                            onCancel={handleCancel}
-                                        />
-                                    ))}
-                                    {/* Waiting entries */}
-                                    {waitingList.map((entry) => (
-                                        <QueueRow
-                                            key={entry._id}
-                                            entry={entry}
-                                            busy={!!actionLoading[entry._id]}
-                                            onCancel={handleCancel}
-                                        />
-                                    ))}
+                                    {waiting.map((entry, idx) => {
+                                        const pos = idx + 1;
+                                        const estWaitMinutes = pos * avgServiceMinutes;
+                                        const pInfo = getPartyInfo(entry);
+                                        return (
+                                            <div key={entry._id} className="sd-row sd-row--waiting">
+                                                <div className="sd-pos-badge" title={`Position #${pos}`}>
+                                                    #{pos}
+                                                </div>
+                                                <span className="sd-row-token font-mono">
+                                                    {entry.tokenLabel || `#${entry.tokenNumber}`}
+                                                </span>
+                                                <div className="sd-row-details">
+                                                    <div className="sd-row-name-wrap">
+                                                        <span className="sd-row-name">
+                                                            {pInfo.name}
+                                                        </span>
+                                                        <span className="sd-party-size-tag">
+                                                            {pInfo.displaySize}
+                                                        </span>
+                                                    </div>
+                                                    <span className="sd-row-subtext">
+                                                        Joined {fmtTime(entry.createdAt)} · ~{estWaitMinutes}m wait
+                                                    </span>
+                                                </div>
+                                                <div className="sd-row-actions">
+                                                    <button
+                                                        className="sd-action-btn sd-action-btn--call"
+                                                        id={`staff-call-btn-${entry._id}`}
+                                                        onClick={() => handleCallParty(entry._id)}
+                                                        disabled={!!actionLoading[entry._id]}
+                                                        title="Call this party to host stand"
+                                                    >
+                                                        {actionLoading[entry._id] ? "…" : "Call party"}
+                                                    </button>
+                                                    <button
+                                                        className="sd-action-btn sd-action-btn--cancel"
+                                                        onClick={() => handleCancel(entry._id)}
+                                                        disabled={!!actionLoading[entry._id]}
+                                                        title="Remove from list"
+                                                    >
+                                                        {actionLoading[entry._id] ? "…" : "Remove"}
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
+                        </section>
+                    </div>
+
+                    {/* ══════════════════════════════════════════════
+                        RIGHT COLUMN: Seated Parties & History
+                       ══════════════════════════════════════════════ */}
+                    <div className="sd-panel sd-panel--right">
+                        {/* ── D. Seated parties (Important New Section) ── */}
+                        <section className="sd-seated-section">
+                            <header className="sd-seated-header">
+                                <div>
+                                    <p className="sd-section-eyebrow">
+                                        Seated parties
+                                        {serving.length > 0 && (
+                                            <span className="sd-count-badge sd-count-badge--serving">
+                                                {serving.length}
+                                            </span>
+                                        )}
+                                    </p>
+                                    <p className="sd-section-sub">
+                                        Active dining room tables · Clear table when meal concludes
+                                    </p>
+                                </div>
+                            </header>
+
+                            {loading ? (
+                                <LoadingDots />
+                            ) : serving.length === 0 ? (
+                                <div className="sd-empty-state">
+                                    <p className="sd-empty-primary">No tables currently seated.</p>
+                                    <p className="sd-empty-secondary">
+                                        When a table-ready party is seated, their active dining status appears here.
+                                    </p>
+                                </div>
+                            ) : (
+                                <div className="sd-seated-grid">
+                                    {serving.map((entry) => {
+                                        const seatedTimeIso = entry.servedAt || entry.updatedAt;
+                                        const elapsedText = getElapsedSeating(seatedTimeIso, now);
+                                        const pInfo = getPartyInfo(entry);
+                                        return (
+                                            <div key={entry._id} className="sd-seated-card">
+                                                <div className="sd-seated-card-top">
+                                                    <span className="sd-seated-token font-mono">
+                                                        {entry.tokenLabel || `#${entry.tokenNumber}`}
+                                                    </span>
+                                                    <span className="sd-elapsed-badge">
+                                                        {elapsedText}
+                                                    </span>
+                                                </div>
+                                                <div className="sd-seated-card-body">
+                                                    <div className="sd-seated-name-wrap">
+                                                        <span className="sd-seated-name">
+                                                            {pInfo.name}
+                                                        </span>
+                                                        <span className="sd-party-size-tag sd-party-size-tag--seated">
+                                                            {pInfo.displaySize}
+                                                        </span>
+                                                    </div>
+                                                    <span className="sd-seated-time">
+                                                        Seated at {fmtTime(seatedTimeIso)}
+                                                    </span>
+                                                </div>
+                                                <div className="sd-seated-card-actions">
+                                                    <button
+                                                        className="sd-btn sd-btn--complete"
+                                                        id={`staff-clear-btn-${entry._id}`}
+                                                        onClick={() => handleComplete(entry._id)}
+                                                        disabled={!!actionLoading[entry._id]}
+                                                    >
+                                                        {actionLoading[entry._id] ? "Clearing…" : "Clear table"}
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
                                 </div>
                             )}
                         </section>
 
-                        {/* Cleared today — collapsed at bottom */}
-                        {past.length > 0 && (
-                            <section className="sd-history-section">
+                        {/* Divider */}
+                        <div className="sd-divider" />
+
+                        {/* ── E. Recently cleared parties ── */}
+                        <section className="sd-history-section">
+                            <header className="sd-history-header">
                                 <p className="sd-section-eyebrow sd-section-eyebrow--muted">
-                                    Cleared today
-                                    <span className="sd-count-badge sd-count-badge--muted">
-                                        {past.length}
-                                    </span>
+                                    Recently cleared
+                                    {history.length > 0 && (
+                                        <span className="sd-count-badge sd-count-badge--muted">
+                                            {history.length}
+                                        </span>
+                                    )}
                                 </p>
-                                <div className="sd-queue-rows sd-queue-rows--muted">
-                                    {past.map((entry) => (
-                                        <div key={entry._id} className="sd-row sd-row--muted">
-                                            <span className="sd-row-token font-mono">
-                                                {entry.tokenLabel || `#${entry.tokenNumber}`}
-                                            </span>
-                                            <span className="sd-row-name">
-                                                {getCustomerName(entry)}
-                                            </span>
-                                            <StatusText status={entry.status} />
-                                            <span className="sd-row-time">{fmtTime(entry.createdAt)}</span>
-                                        </div>
-                                    ))}
+                            </header>
+
+                            {loading ? (
+                                <LoadingDots />
+                            ) : history.length === 0 ? (
+                                <div className="sd-empty-state sd-empty-state--compact">
+                                    <p className="sd-empty-secondary">
+                                        No tables cleared yet today. Completed dining parties will appear here.
+                                    </p>
                                 </div>
-                            </section>
-                        )}
+                            ) : (
+                                <div className="sd-queue-rows sd-queue-rows--history">
+                                    {history.map((entry) => {
+                                        const pInfo = getPartyInfo(entry);
+                                        return (
+                                            <div key={entry._id} className="sd-row sd-row--history">
+                                                <span className="sd-row-token font-mono">
+                                                    {entry.tokenLabel || `#${entry.tokenNumber}`}
+                                                </span>
+                                                <div className="sd-history-name-wrap">
+                                                    <span className="sd-row-name">
+                                                        {pInfo.name}
+                                                    </span>
+                                                    <span className="sd-history-size">
+                                                        {pInfo.displaySize}
+                                                    </span>
+                                                </div>
+                                                <span className="sd-status-cleared-pill">
+                                                    Cleared
+                                                </span>
+                                                <span className="sd-row-time">
+                                                    {fmtTime(entry.completedAt || entry.updatedAt)}
+                                                </span>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
+                        </section>
                     </div>
                 </div>
             </main>
@@ -422,51 +739,7 @@ export default function StaffDashboard() {
     );
 }
 
-/* ── Queue row sub-component ────────────────────────────── */
-function QueueRow({ entry, busy, onStart, onComplete, onCancel }) {
-    const id = entry._id;
-    return (
-        <div className={`sd-row sd-row--${entry.status.toLowerCase()}`}>
-            <StatusDot status={entry.status} />
-            <span className="sd-row-token font-mono">
-                {entry.tokenLabel || `#${entry.tokenNumber}`}
-            </span>
-            <span className="sd-row-name">{getCustomerName(entry)}</span>
-            <span className="sd-row-time">{fmtTime(entry.createdAt)}</span>
-            <div className="sd-row-actions">
-                {entry.status === "CALLED" && onStart && (
-                    <button
-                        className="sd-action-btn sd-action-btn--start"
-                        onClick={() => onStart(id)}
-                        disabled={busy}
-                    >
-                        {busy ? "…" : "Seat"}
-                    </button>
-                )}
-                {entry.status === "SERVING" && onComplete && (
-                    <button
-                        className="sd-action-btn sd-action-btn--complete"
-                        onClick={() => onComplete(id)}
-                        disabled={busy}
-                    >
-                        {busy ? "…" : "Clear"}
-                    </button>
-                )}
-                {["WAITING", "CALLED"].includes(entry.status) && onCancel && (
-                    <button
-                        className="sd-action-btn sd-action-btn--cancel"
-                        onClick={() => onCancel(id)}
-                        disabled={busy}
-                    >
-                        {busy ? "…" : "Remove"}
-                    </button>
-                )}
-            </div>
-        </div>
-    );
-}
-
-/* ── Loading dots ───────────────────────────────────────── */
+/* ── Loading dots sub-component ─────────────────────────── */
 function LoadingDots() {
     return (
         <div className="sd-loading" aria-label="Loading">

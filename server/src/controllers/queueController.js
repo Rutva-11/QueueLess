@@ -2,11 +2,13 @@ const {
     getAllServices,
     joinQueue,
     callNext,
+    callSpecific,
     startServing,
     completeEntry,
     cancelEntry,
     getServiceQueue,
-    getMyQueueEntry
+    getMyQueueEntry,
+    getServiceHistory
 } = require("../services/queueService");
 
 const {
@@ -160,13 +162,51 @@ async function getMyQueueEntryController(req, res, next) {
     }
 }
 
+async function callSpecificController(req, res, next) {
+    try {
+        const { id } = req.params;
+
+        if (!id || typeof id !== "string" || id.trim() === "") {
+            const error = new Error("Queue entry ID is required");
+            error.statusCode = 400;
+            throw error;
+        }
+
+        const entry = await callSpecific(id.trim());
+        emitQueueCalled(entry);
+        res.json(entry);
+    } catch (error) {
+        next(error);
+    }
+}
+
+async function getServiceHistoryController(req, res, next) {
+    try {
+        const { serviceId } = req.params;
+        const { limit } = req.query;
+
+        if (!serviceId || typeof serviceId !== "string" || serviceId.trim() === "") {
+            const error = new Error("Service ID is required");
+            error.statusCode = 400;
+            throw error;
+        }
+
+        const data = await getServiceHistory(serviceId.trim(), limit);
+        res.json(data);
+    } catch (error) {
+        next(error);
+    }
+}
+
 module.exports = {
     getServicesController,
     joinQueueController,
     callNextController,
+    callSpecificController,
     startServingController,
     completeEntryController,
     cancelEntryController,
     getServiceQueueController,
-    getMyQueueEntryController
+    getMyQueueEntryController,
+    getServiceHistoryController
 };

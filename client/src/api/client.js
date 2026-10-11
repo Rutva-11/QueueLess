@@ -17,6 +17,33 @@ apiClient.interceptors.request.use((config) => {
     return config;
 });
 
+// Global response interceptor for authentication errors
+apiClient.interceptors.response.use(
+    (response) => response,
+    (error) => {
+        if (error.response && error.response.status === 401) {
+            const url = error.config?.url || "";
+            // Do not intercept initial sign-in attempts (e.g. wrong password)
+            const isAuthSubmission = url.includes("/auth/login") || url.includes("/auth/customer/check-in");
+            if (!isAuthSubmission) {
+                localStorage.removeItem("token");
+                localStorage.removeItem("ql_token");
+                localStorage.removeItem("ql_user");
+                if (typeof window !== "undefined") {
+                    window.dispatchEvent(
+                        new CustomEvent("auth:expired", {
+                            detail: {
+                                message: "Your session has expired. Please sign in again."
+                            }
+                        })
+                    );
+                }
+            }
+        }
+        return Promise.reject(error);
+    }
+);
+
 // Auth endpoints
 export const authAPI = {
     checkIn: (data) => apiClient.post("/auth/customer/check-in", data),
@@ -31,9 +58,11 @@ export const queueAPI = {
     myEntry: () => apiClient.get("/queue/my"),
     serviceQueue: (serviceId) => apiClient.get(`/queue/service/${serviceId}`),
     callNext: (serviceId) => apiClient.post("/queue/call-next", { serviceId }),
+    callParty: (entryId) => apiClient.post(`/queue/${entryId}/call`),
     startServing: (entryId) => apiClient.post(`/queue/${entryId}/start`),
     complete: (entryId) => apiClient.post(`/queue/${entryId}/complete`),
-    cancel: (entryId) => apiClient.post(`/queue/${entryId}/cancel`)
+    cancel: (entryId) => apiClient.post(`/queue/${entryId}/cancel`),
+    history: (serviceId, limit = 20) => apiClient.get(`/queue/service/${serviceId}/history?limit=${limit}`)
 };
 
 export default apiClient;

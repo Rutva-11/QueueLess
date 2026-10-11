@@ -1,15 +1,20 @@
 import React, { useState } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import { useNavigate, useLocation, Link } from "react-router-dom";
 import { useAuth } from "../context/useAuth";
 import "./Auth.css";
 
 export default function LoginPage() {
     const { login } = useAuth();
     const navigate = useNavigate();
+    const location = useLocation();
 
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
-    const [error, setError] = useState("");
+    const [error, setError] = useState(() => {
+        const queryExpired = new URLSearchParams(location.search).get("expired");
+        if (queryExpired) return "Your session has expired. Please sign in again.";
+        return location.state?.message || location.state?.error || "";
+    });
     const [loading, setLoading] = useState(false);
 
     const handleSubmit = async (e) => {

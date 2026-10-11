@@ -18,6 +18,10 @@ function formatEntryPayload(entry) {
         tokenLabel: entry.tokenLabel,
         status: entry.status,
         counterId: entry.counterId || null,
+        calledAt: entry.calledAt || null,
+        servedAt: entry.servedAt || null,
+        completedAt: entry.completedAt || null,
+        partySize: entry.partySize || 2,
         createdAt: entry.createdAt,
         updatedAt: entry.updatedAt
     };

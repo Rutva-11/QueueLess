@@ -42,8 +42,32 @@ export function SocketProvider({ children }) {
         });
 
         socketInstance.on("connect_error", (err) => {
-            console.warn("[Socket] connection error:", err.message);
-            setConnected(false);
+            const errMsg = err?.message || "";
+            const isAuthErr =
+                errMsg.includes("Invalid or expired token") ||
+                errMsg.includes("Authentication required") ||
+                err.data?.code === "INVALID_TOKEN" ||
+                err.data?.code === "UNAUTHORIZED";
+
+            if (isAuthErr) {
+                console.warn("[Socket] Authentication rejected — session invalid or expired");
+                socketInstance.disconnect();
+                setConnected(false);
+                setSocket(null);
+                localStorage.removeItem("token");
+                localStorage.removeItem("ql_token");
+                localStorage.removeItem("ql_user");
+                if (typeof window !== "undefined") {
+                    window.dispatchEvent(
+                        new CustomEvent("auth:expired", {
+                            detail: { message: "Your session has expired. Please sign in again." }
+                        })
+                    );
+                }
+            } else {
+                console.warn("[Socket] Transient connection error:", errMsg);
+                setConnected(false);
+            }
         });
 
         setSocket(socketInstance);

@@ -3,6 +3,7 @@ const mongoose = require("mongoose");
 const connectDB = require("../config/db");
 const Organization = require("../models/Organization");
 const Service = require("../models/Service");
+const QueueEntry = require("../models/QueueEntry");
 
 async function seedData() {
     try {
