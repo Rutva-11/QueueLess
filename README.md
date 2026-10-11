@@ -293,7 +293,7 @@ Want to explore the restaurant host dashboard? Use the demo staff account to try
 
 - **Staff Login:** [Open the host sign-in page](https://queue-less-beta.vercel.app/login)
 - **Email:** `staff@example.com`
-- **Password:** Use the demo password provided by the project maintainer.
+- **Password:** 123456
 
 **Note:** The live demo uses a shared account. Please avoid entering sensitive or personal information, and do not change account settings or interfere with other users' demo sessions.
 
