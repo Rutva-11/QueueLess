@@ -108,6 +108,7 @@ export default function StaffDashboard() {
     const [actionLoading, setActionLoading] = useState({});
     const [now, setNow] = useState(() => Date.now());
     const clearedEntryIdsRef = useRef(new Set());
+    const lastRequestIdRef = useRef(0);
 
     /* ── Live elapsed clock ticker (every 30 seconds) ─────── */
     useEffect(() => {
@@ -167,12 +168,17 @@ export default function StaffDashboard() {
         }
         if (showSpinner) setLoading(true);
 
+        const requestId = ++lastRequestIdRef.current;
+
         try {
             setError("");
             const [queueRes, historyRes] = await Promise.allSettled([
                 queueAPI.serviceQueue(serviceId),
                 queueAPI.history(serviceId, 20)
             ]);
+
+            // Discard response if a newer request was dispatched in the meantime
+            if (requestId !== lastRequestIdRef.current) return;
 
             if (queueRes.status === "fulfilled") {
                 const rawQueue = Array.isArray(queueRes.value?.data) ? queueRes.value.data : [];
@@ -197,6 +203,8 @@ export default function StaffDashboard() {
                 if (typeof histData.clearedTodayCount === "number") {
                     setClearedTodayCount(histData.clearedTodayCount);
                 }
+                // Clear any prior history-specific error message
+                setError((prev) => (prev === "Failed to update completion history." ? "" : prev));
             } else {
                 const errStatus = historyRes.reason?.response?.status;
                 if (errStatus === 401) {
@@ -207,6 +215,14 @@ export default function StaffDashboard() {
                     });
                     return;
                 }
+
+                // If completion history endpoint returns 404 (e.g. backend server running earlier build
+                // or during deployment rollover), preserve live session history without showing an intrusive fatal error banner.
+                if (errStatus === 404) {
+                    console.warn("Completion history endpoint returned 404. Preserving active session completion history.");
+                    return;
+                }
+
                 console.error("Failed to load completion history:", historyRes.reason);
                 setError(
                     historyRes.reason?.response?.data?.message ||
