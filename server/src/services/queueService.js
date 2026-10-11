@@ -264,6 +264,11 @@ async function completeEntry(entryId) {
     entry.completedAt = new Date();
     await entry.save();
 
+    await entry.populate([
+        { path: "userId", select: "name email" },
+        { path: "serviceId", select: "name tokenPrefix avgServiceMinutes" }
+    ]);
+
     return entry;
 }
 
@@ -354,7 +359,67 @@ async function getAllServices() {
     return await Service.find({ isActive: true }).select("_id name avgServiceMinutes tokenPrefix isActive").lean();
 }
 
-async function getServiceHistory(serviceId, limit = 20) {
+function getStartOfToday(tz) {
+    if (tz && typeof tz === "string") {
+        try {
+            const timeZone = tz.trim();
+            const now = new Date();
+            const dateParts = new Intl.DateTimeFormat("en-CA", {
+                timeZone,
+                year: "numeric",
+                month: "2-digit",
+                day: "2-digit"
+            }).formatToParts(now);
+
+            const y = dateParts.find((p) => p.type === "year")?.value;
+            const m = dateParts.find((p) => p.type === "month")?.value;
+            const d = dateParts.find((p) => p.type === "day")?.value;
+
+            if (y && m && d) {
+                let candidate = new Date(`${y}-${m}-${d}T00:00:00.000Z`);
+                const timeFormatter = new Intl.DateTimeFormat("en-US", {
+                    timeZone,
+                    hourCycle: "h23",
+                    hour: "numeric",
+                    minute: "numeric",
+                    second: "numeric"
+                });
+
+                for (let i = 0; i < 3; i++) {
+                    const parts = timeFormatter.formatToParts(candidate);
+                    const h = parseInt(parts.find((p) => p.type === "hour")?.value || "0", 10);
+                    const min = parseInt(parts.find((p) => p.type === "minute")?.value || "0", 10);
+                    const s = parseInt(parts.find((p) => p.type === "second")?.value || "0", 10);
+
+                    const partsDate = new Intl.DateTimeFormat("en-CA", {
+                        timeZone,
+                        year: "numeric",
+                        month: "2-digit",
+                        day: "2-digit"
+                    }).formatToParts(candidate);
+                    const candD = partsDate.find((p) => p.type === "day")?.value;
+                    let diffMs;
+                    if (candD !== d) {
+                        diffMs = ((h - 24) * 3600 + min * 60 + s) * 1000;
+                    } else {
+                        diffMs = (h * 3600 + min * 60 + s) * 1000;
+                    }
+
+                    if (diffMs === 0) break;
+                    candidate = new Date(candidate.getTime() - diffMs);
+                }
+                return candidate;
+            }
+        } catch {
+            // fallback to server local midnight
+        }
+    }
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    return d;
+}
+
+async function getServiceHistory(serviceId, limit = 20, tz = null) {
     let service;
     try {
         service = await Service.findById(serviceId);
@@ -376,7 +441,7 @@ async function getServiceHistory(serviceId, limit = 20) {
     const safeLimit = Math.min(Math.max(parseInt(limit, 10) || 20, 1), 100);
 
     const history = await QueueEntry.find({
-        serviceId,
+        serviceId: service._id,
         status: "COMPLETED"
     })
         .sort({ completedAt: -1, updatedAt: -1 })
@@ -385,12 +450,10 @@ async function getServiceHistory(serviceId, limit = 20) {
         .populate({ path: "serviceId", select: "name tokenPrefix avgServiceMinutes" })
         .lean();
 
-    // Start of current calendar day in server local timezone
-    const startOfToday = new Date();
-    startOfToday.setHours(0, 0, 0, 0);
+    const startOfToday = getStartOfToday(tz);
 
     const clearedTodayCount = await QueueEntry.countDocuments({
-        serviceId,
+        serviceId: service._id,
         status: "COMPLETED",
         $or: [
             { completedAt: { $gte: startOfToday } },

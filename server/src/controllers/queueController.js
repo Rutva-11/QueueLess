@@ -183,7 +183,7 @@ async function callSpecificController(req, res, next) {
 async function getServiceHistoryController(req, res, next) {
     try {
         const { serviceId } = req.params;
-        const { limit } = req.query;
+        const { limit, tz } = req.query;
 
         if (!serviceId || typeof serviceId !== "string" || serviceId.trim() === "") {
             const error = new Error("Service ID is required");
@@ -191,7 +191,8 @@ async function getServiceHistoryController(req, res, next) {
             throw error;
         }
 
-        const data = await getServiceHistory(serviceId.trim(), limit);
+        const clientTz = tz || req.headers["x-timezone"] || null;
+        const data = await getServiceHistory(serviceId.trim(), limit, clientTz);
         res.json(data);
     } catch (error) {
         next(error);

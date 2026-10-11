@@ -62,7 +62,16 @@ export const queueAPI = {
     startServing: (entryId) => apiClient.post(`/queue/${entryId}/start`),
     complete: (entryId) => apiClient.post(`/queue/${entryId}/complete`),
     cancel: (entryId) => apiClient.post(`/queue/${entryId}/cancel`),
-    history: (serviceId, limit = 20) => apiClient.get(`/queue/service/${serviceId}/history?limit=${limit}`)
+    history: (serviceId, limit = 20) => {
+        let tz = "";
+        try {
+            tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "";
+        } catch {
+            tz = "";
+        }
+        const tzParam = tz ? `&tz=${encodeURIComponent(tz)}` : "";
+        return apiClient.get(`/queue/service/${serviceId}/history?limit=${limit}${tzParam}`);
+    }
 };
 
 export default apiClient;

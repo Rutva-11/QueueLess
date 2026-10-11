@@ -99,9 +99,9 @@ async function runDashboardTests() {
     console.log(`✅ Party 1 seated: ${seat1.data.tokenLabel} with servedAt timestamp`);
 
     // 8. Host calls and seats Party 2 as well -> Verify multiple seated parties simultaneously!
-    const call2 = await request('POST', '/queue/call-next', { serviceId }, staffToken);
+    const call2 = await request('POST', `/queue/${join2.data._id}/call`, null, staffToken);
     if (call2.status !== 200 || call2.data.status !== 'CALLED') {
-        throw new Error('Call next failed for party 2');
+        throw new Error(`Call party 2 failed: ${JSON.stringify(call2.data)}`);
     }
     const seat2 = await request('POST', `/queue/${join2.data._id}/start`, null, staffToken);
     if (seat2.status !== 200 || seat2.data.status !== 'SERVING') {
@@ -125,36 +125,84 @@ async function runDashboardTests() {
     console.log(`✅ Active waiting list confirmed: ${waitingList.length} waiting parties`);
 
     // 10. Clear Table for Party 1 (SERVING -> COMPLETED)
+    const baselineHistoryRes = await request('GET', `/queue/service/${serviceId}/history`, null, staffToken);
+    const baselineCount = baselineHistoryRes.data.clearedTodayCount || 0;
+
     const clear1 = await request('POST', `/queue/${join1.data._id}/complete`, null, staffToken);
     if (clear1.status !== 200 || clear1.data.status !== 'COMPLETED' || !clear1.data.completedAt) {
         throw new Error(`Failed to clear table for party 1: ${JSON.stringify(clear1.data)}`);
     }
     console.log(`✅ Party 1 table cleared: ${clear1.data.tokenLabel} with completedAt timestamp`);
 
-    // 11. Fetch History and Cleared Today metric
-    const historyRes = await request('GET', `/queue/service/${serviceId}/history`, null, staffToken);
-    if (historyRes.status !== 200) {
-        throw new Error(`Failed to fetch history: ${JSON.stringify(historyRes.data)}`);
+    // Verify Party 1 in MongoDB
+    const dbEntry1 = await QueueEntry.findById(join1.data._id);
+    if (dbEntry1.status !== 'COMPLETED' || !dbEntry1.completedAt || dbEntry1.partySize !== 4) {
+        throw new Error(`MongoDB record verification failed for party 1: ${JSON.stringify(dbEntry1)}`);
     }
-    const { history, clearedTodayCount } = historyRes.data;
-    console.log(`✅ History retrieved: ${history.length} completed entries, clearedTodayCount: ${clearedTodayCount}`);
+    console.log(`✅ Party 1 verified in MongoDB: status=COMPLETED, completedAt=${dbEntry1.completedAt.toISOString()}, partySize=4`);
 
-    const foundCleared = history.find(e => e._id.toString() === join1.data._id.toString());
-    if (!foundCleared) {
-        throw new Error('Recently cleared party 1 not found in history');
+    // 11. Fetch History and check clearedTodayCount increment
+    const historyRes1 = await request('GET', `/queue/service/${serviceId}/history?tz=Asia/Kolkata`, null, staffToken);
+    if (historyRes1.status !== 200) {
+        throw new Error(`Failed to fetch history: ${JSON.stringify(historyRes1.data)}`);
     }
-    if (clearedTodayCount < 1) {
-        throw new Error('clearedTodayCount should be at least 1');
+    const { history: histList1, clearedTodayCount: count1 } = historyRes1.data;
+    if (count1 !== baselineCount + 1) {
+        throw new Error(`Expected clearedTodayCount to be ${baselineCount + 1}, got ${count1}`);
     }
-    console.log(`✅ Party 1 verified in recent history and clearedTodayCount metric is accurate!`);
+    const foundCleared1 = histList1.find(e => e._id.toString() === join1.data._id.toString());
+    if (!foundCleared1 || !foundCleared1.completedAt || foundCleared1.partySize !== 4) {
+        throw new Error('Party 1 not found or incomplete in history response');
+    }
+    console.log(`✅ Party 1 verified in recent history and clearedTodayCount accurately incremented by +1 (${baselineCount} -> ${count1})`);
 
-    // 12. Clean up test entries
-    await QueueEntry.deleteMany({ _id: { $in: [join1.data._id, join2.data._id, join3.data._id] } });
+    // 12. Clear Table for Party 2 -> Multiple cleared parties increment count correctly
+    const clear2 = await request('POST', `/queue/${join2.data._id}/complete`, null, staffToken);
+    if (clear2.status !== 200 || clear2.data.status !== 'COMPLETED') {
+        throw new Error('Clear party 2 failed');
+    }
+    const historyRes2 = await request('GET', `/queue/service/${serviceId}/history`, null, staffToken);
+    const count2 = historyRes2.data.clearedTodayCount;
+    if (count2 !== baselineCount + 2) {
+        throw new Error(`Expected clearedTodayCount to be ${baselineCount + 2}, got ${count2}`);
+    }
+    console.log(`✅ Clearing multiple parties increments count correctly (${count1} -> ${count2})`);
+
+    // 13. Verify pagination limit does NOT affect clearedTodayCount
+    const limitedHistoryRes = await request('GET', `/queue/service/${serviceId}/history?limit=1`, null, staffToken);
+    if (limitedHistoryRes.data.history.length !== 1) {
+        throw new Error(`Expected history length 1 with limit=1, got ${limitedHistoryRes.data.history.length}`);
+    }
+    if (limitedHistoryRes.data.clearedTodayCount !== count2) {
+        throw new Error(`Pagination limit affected clearedTodayCount! Expected ${count2}, got ${limitedHistoryRes.data.clearedTodayCount}`);
+    }
+    console.log(`✅ Pagination limit (limit=1) preserves full daily count: history.length=1, clearedTodayCount=${count2}`);
+
+    // 14. Verify entries completed on a previous day do NOT count toward today's metric
+    const yesterdayDate = new Date(Date.now() - 48 * 3600 * 1000); // 2 days ago
+    const yesterdayEntry = await QueueEntry.create({
+        serviceId,
+        userId: join3.data.userId,
+        tokenNumber: 999,
+        tokenLabel: 'Y-999',
+        status: 'COMPLETED',
+        completedAt: yesterdayDate,
+        partySize: 2
+    });
+
+    const checkYesterdayRes = await request('GET', `/queue/service/${serviceId}/history`, null, staffToken);
+    if (checkYesterdayRes.data.clearedTodayCount !== count2) {
+        throw new Error(`Yesterday's entry was incorrectly counted towards today's count! Expected ${count2}, got ${checkYesterdayRes.data.clearedTodayCount}`);
+    }
+    console.log(`✅ Entry completed 2 days ago correctly excluded from clearedTodayCount (${checkYesterdayRes.data.clearedTodayCount})`);
+
+    // 15. Clean up test entries
+    await QueueEntry.deleteMany({ _id: { $in: [join1.data._id, join2.data._id, join3.data._id, yesterdayEntry._id] } });
     await User.deleteMany({ email: { $in: [staffEmail, customerEmail1, customerEmail2, customerEmail3] } });
     await mongoose.disconnect();
 
     console.log('\n========================================================');
-    console.log('   ALL HOST DASHBOARD BACKEND TESTS PASSED (12/12)   ');
+    console.log('   ALL HOST DASHBOARD BACKEND TESTS PASSED (15/15)   ');
     console.log('========================================================');
 }
 

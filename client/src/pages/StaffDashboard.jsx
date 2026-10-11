@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/useAuth";
 import { useSocket } from "../context/useSocket";
@@ -67,6 +67,25 @@ function getPartyInfo(entry) {
     };
 }
 
+function dedupeHistory(entries) {
+    if (!Array.isArray(entries)) return [];
+    const seen = new Set();
+    const result = [];
+    for (const item of entries) {
+        if (!item) continue;
+        const id = item._id ? item._id.toString() : (item.entryId ? item.entryId.toString() : null);
+        if (!id) {
+            result.push(item);
+            continue;
+        }
+        if (!seen.has(id)) {
+            seen.add(id);
+            result.push(item);
+        }
+    }
+    return result;
+}
+
 /* ─── Main Component ───────────────────────────────────── */
 export default function StaffDashboard() {
     const { user, logout } = useAuth();
@@ -88,6 +107,7 @@ export default function StaffDashboard() {
     const [error, setError] = useState("");
     const [actionLoading, setActionLoading] = useState({});
     const [now, setNow] = useState(() => Date.now());
+    const clearedEntryIdsRef = useRef(new Set());
 
     /* ── Live elapsed clock ticker (every 30 seconds) ─────── */
     useEffect(() => {
@@ -172,8 +192,11 @@ export default function StaffDashboard() {
 
             if (historyRes.status === "fulfilled") {
                 const histData = historyRes.value?.data || {};
-                setHistory(Array.isArray(histData.history) ? histData.history : []);
-                setClearedTodayCount(typeof histData.clearedTodayCount === "number" ? histData.clearedTodayCount : 0);
+                const histList = Array.isArray(histData.history) ? histData.history : [];
+                setHistory(dedupeHistory(histList));
+                if (typeof histData.clearedTodayCount === "number") {
+                    setClearedTodayCount(histData.clearedTodayCount);
+                }
             } else {
                 const errStatus = historyRes.reason?.response?.status;
                 if (errStatus === 401) {
@@ -184,6 +207,12 @@ export default function StaffDashboard() {
                     });
                     return;
                 }
+                console.error("Failed to load completion history:", historyRes.reason);
+                setError(
+                    historyRes.reason?.response?.data?.message ||
+                        historyRes.reason?.response?.data?.error ||
+                        "Failed to update completion history."
+                );
             }
         } catch (err) {
             const errStatus = err?.response?.status;
@@ -222,25 +251,66 @@ export default function StaffDashboard() {
     useEffect(() => {
         if (!socket || !serviceId) return;
 
-        // Subscribe to this dining area's service room for live updates
         socket.emit("join:service", serviceId);
 
-        const refresh = () => fetchAuthoritativeState(false);
+        let debounceTimer = null;
+        const debouncedRefresh = () => {
+            if (debounceTimer) clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(() => {
+                fetchAuthoritativeState(false);
+            }, 60);
+        };
 
-        const events = [
-            "queue:joined",
-            "queue:called",
-            "queue:started",
-            "queue:completed",
-            "queue:cancelled",
-            "queue:updated",
-            "connect"
-        ];
+        const handleQueueCompleted = (payload) => {
+            if (payload && (payload.entryId || payload._id)) {
+                const id = (payload.entryId || payload._id).toString();
+                const locallyInitiated = clearedEntryIdsRef.current.has(id);
+                if (locallyInitiated) {
+                    clearedEntryIdsRef.current.delete(id);
+                }
 
-        events.forEach((e) => socket.on(e, refresh));
+                setQueue((prev) => prev.filter((e) => e._id !== id));
+                setHistory((prev) => {
+                    const alreadyExists = prev.some(
+                        (h) => (h._id && h._id.toString() === id) || (h.entryId && h.entryId.toString() === id)
+                    );
+                    if (alreadyExists) return prev;
+
+                    // If not initiated by this client, optimistically increment count
+                    if (!locallyInitiated) {
+                        setClearedTodayCount((c) => c + 1);
+                    }
+
+                    const newEntry = {
+                        ...payload,
+                        _id: id,
+                        status: "COMPLETED",
+                        completedAt: payload.completedAt || new Date().toISOString()
+                    };
+                    return dedupeHistory([newEntry, ...prev]);
+                });
+            }
+            debouncedRefresh();
+        };
+
+        socket.on("queue:joined", debouncedRefresh);
+        socket.on("queue:called", debouncedRefresh);
+        socket.on("queue:started", debouncedRefresh);
+        socket.on("queue:completed", handleQueueCompleted);
+        socket.on("queue:cancelled", debouncedRefresh);
+        socket.on("queue:updated", debouncedRefresh);
+        socket.on("connect", debouncedRefresh);
+
         return () => {
+            if (debounceTimer) clearTimeout(debounceTimer);
             socket.emit("leave:service", serviceId);
-            events.forEach((e) => socket.off(e, refresh));
+            socket.off("queue:joined", debouncedRefresh);
+            socket.off("queue:called", debouncedRefresh);
+            socket.off("queue:started", debouncedRefresh);
+            socket.off("queue:completed", handleQueueCompleted);
+            socket.off("queue:cancelled", debouncedRefresh);
+            socket.off("queue:updated", debouncedRefresh);
+            socket.off("connect", debouncedRefresh);
         };
     }, [socket, serviceId, fetchAuthoritativeState]);
 
@@ -279,8 +349,32 @@ export default function StaffDashboard() {
     const handleStart = (entryId) =>
         withLoading(entryId, () => queueAPI.startServing(entryId));
 
-    const handleComplete = (entryId) =>
-        withLoading(entryId, () => queueAPI.complete(entryId));
+    const handleComplete = async (entryId) => {
+        const partyBeingCleared = queue.find((e) => e._id === entryId);
+        clearedEntryIdsRef.current.add(entryId);
+
+        await withLoading(entryId, async () => {
+            const res = await queueAPI.complete(entryId);
+            const completedData = res?.data || {};
+
+            // 1. Immediately remove from active queue (disappears from Seated Parties)
+            setQueue((prevQueue) => prevQueue.filter((e) => e._id !== entryId));
+
+            // 2. Prepend to history without duplicates
+            const partyToAdd = {
+                ...(partyBeingCleared || {}),
+                ...completedData,
+                _id: entryId,
+                status: "COMPLETED",
+                completedAt: completedData.completedAt || new Date().toISOString()
+            };
+
+            setHistory((prevHistory) => dedupeHistory([partyToAdd, ...prevHistory]));
+
+            // 3. Immediately increment clearedTodayCount
+            setClearedTodayCount((prev) => Math.max(prev + 1, 1));
+        });
+    };
 
     const handleCancel = (entryId) =>
         withLoading(entryId, () => queueAPI.cancel(entryId));
